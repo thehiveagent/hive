@@ -5,3 +5,8 @@
 !.rocket/config.json
 .rocket/index.db
 .rocket/cache/
+
+
+/dist/
+/node_modules
+/package-lock.json
