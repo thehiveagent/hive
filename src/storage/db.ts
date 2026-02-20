@@ -47,6 +47,11 @@ export interface AppendMessageInput {
   content: string;
 }
 
+export interface UpdatePrimaryAgentProviderModelInput {
+  provider: string;
+  model: string;
+}
+
 export const HIVE_DIRECTORY_NAME = ".hive";
 export const HIVE_DB_FILENAME = "hive.db";
 
@@ -302,6 +307,54 @@ export function upsertPrimaryAgent(
     about_raw: input.aboutRaw ?? null,
     agent_name: input.agentName ?? null,
     created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
+
+export function updatePrimaryAgentProviderAndModel(
+  db: HiveDatabase,
+  input: UpdatePrimaryAgentProviderModelInput,
+): AgentRecord {
+  const existing = getPrimaryAgent(db);
+  if (!existing) {
+    throw new Error("Hive is not initialized. Run `hive init` first.");
+  }
+
+  return updatePrimaryAgentConfiguration(db, existing, input.provider, input.model);
+}
+
+export function updatePrimaryAgentModel(
+  db: HiveDatabase,
+  model: string,
+): AgentRecord {
+  const existing = getPrimaryAgent(db);
+  if (!existing) {
+    throw new Error("Hive is not initialized. Run `hive init` first.");
+  }
+
+  return updatePrimaryAgentConfiguration(db, existing, existing.provider, model);
+}
+
+function updatePrimaryAgentConfiguration(
+  db: HiveDatabase,
+  existing: AgentRecord,
+  provider: string,
+  model: string,
+): AgentRecord {
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE agents
+      SET provider = ?, model = ?, updated_at = ?
+      WHERE id = ?
+    `,
+  ).run(provider, model, timestamp, existing.id);
+
+  return {
+    ...existing,
+    provider,
+    model,
     updated_at: timestamp,
   };
 }

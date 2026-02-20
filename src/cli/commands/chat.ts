@@ -51,7 +51,7 @@ export async function runChatCommand(options: ChatCommandOptions): Promise<void>
       return;
     }
 
-    const provider = createProvider(profile.provider);
+    const provider = await createProvider(profile.provider);
     const agent = new HiveAgent(db, provider, profile);
 
     let conversationId = options.conversation;

@@ -1,5 +1,6 @@
 import fetch from "node-fetch";
 
+import { resolveProviderApiKey } from "./api-key.js";
 import {
   ProviderConfigurationError,
   ProviderRequestError,
@@ -23,8 +24,8 @@ export class AnthropicProvider implements Provider {
 
   private readonly apiKey?: string;
 
-  constructor() {
-    this.apiKey = process.env.ANTHROPIC_API_KEY;
+  constructor(apiKey?: string) {
+    this.apiKey = apiKey;
     this.defaultModel = process.env.ANTHROPIC_MODEL ?? DEFAULT_ANTHROPIC_MODEL;
   }
 
@@ -92,6 +93,11 @@ export class AnthropicProvider implements Provider {
       }
     }
   }
+}
+
+export async function createAnthropicProvider(): Promise<AnthropicProvider> {
+  const apiKey = await resolveProviderApiKey("anthropic", "ANTHROPIC_API_KEY");
+  return new AnthropicProvider(apiKey);
 }
 
 function toAnthropicMessages(messages: ProviderMessage[]): AnthropicMessage[] {

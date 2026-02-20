@@ -6,6 +6,9 @@ export const SUPPORTED_PROVIDER_NAMES = [
   "ollama",
   "groq",
   "mistral",
+  "google",
+  "openrouter",
+  "together",
 ] as const;
 
 export type ProviderName = (typeof SUPPORTED_PROVIDER_NAMES)[number];
@@ -105,7 +108,7 @@ export async function* streamOpenAICompatibleChat(
     body: JSON.stringify(body),
   });
 
-  ensureOk(response, `${input.provider} request failed`);
+  await ensureOk(response, `${input.provider} request failed`);
 
   for await (const data of iterateSseData(response)) {
     if (data === "[DONE]") {
@@ -217,12 +220,15 @@ function pickErrorMessage(payload: Record<string, unknown>): string | null {
   return null;
 }
 
-function ensureOk(response: Response, fallbackMessage: string): void {
+async function ensureOk(response: Response, fallbackMessage: string): Promise<void> {
   if (response.ok) {
     return;
   }
 
+  const bodyText = (await response.text()).trim();
+  const details = bodyText.length > 0 ? ` ${bodyText}` : "";
+
   throw new ProviderRequestError(
-    `${fallbackMessage}: HTTP ${response.status} ${response.statusText}`,
+    `${fallbackMessage}: HTTP ${response.status} ${response.statusText}${details}`,
   );
 }

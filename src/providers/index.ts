@@ -3,26 +3,35 @@ import {
   type Provider,
   type ProviderName,
 } from "./base.js";
-import { AnthropicProvider } from "./anthropic.js";
-import { GroqProvider } from "./groq.js";
-import { MistralProvider } from "./mistral.js";
-import { OllamaProvider } from "./ollama.js";
-import { OpenAIProvider } from "./openai.js";
+import { createAnthropicProvider } from "./anthropic.js";
+import { createGoogleProvider } from "./google.js";
+import { createGroqProvider } from "./groq.js";
+import { createMistralProvider } from "./mistral.js";
+import { createOllamaProvider } from "./ollama.js";
+import { createOpenAIProvider } from "./openai.js";
+import { createOpenRouterProvider } from "./openrouter.js";
+import { createTogetherProvider } from "./together.js";
 
-export function createProvider(name?: string): Provider {
+export async function createProvider(name?: string): Promise<Provider> {
   const resolvedName = normalizeProviderName(name ?? process.env.HIVE_PROVIDER);
 
   switch (resolvedName) {
     case "openai":
-      return new OpenAIProvider();
+      return createOpenAIProvider();
     case "anthropic":
-      return new AnthropicProvider();
+      return createAnthropicProvider();
     case "ollama":
-      return new OllamaProvider();
+      return createOllamaProvider();
     case "groq":
-      return new GroqProvider();
+      return createGroqProvider();
     case "mistral":
-      return new MistralProvider();
+      return createMistralProvider();
+    case "google":
+      return createGoogleProvider();
+    case "openrouter":
+      return createOpenRouterProvider();
+    case "together":
+      return createTogetherProvider();
     default:
       return assertNever(resolvedName);
   }
@@ -40,6 +49,12 @@ export function getDefaultModelForProvider(name: ProviderName): string {
       return process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile";
     case "mistral":
       return process.env.MISTRAL_MODEL ?? "mistral-small-latest";
+    case "google":
+      return process.env.GOOGLE_MODEL ?? "gemini-2.0-flash";
+    case "openrouter":
+      return process.env.OPENROUTER_MODEL ?? "openai/gpt-4o-mini";
+    case "together":
+      return process.env.TOGETHER_MODEL ?? "meta-llama/Llama-3.3-70B-Instruct-Turbo";
     default:
       return assertNever(name);
   }

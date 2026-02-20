@@ -42,13 +42,13 @@ export class HiveAgent {
     private readonly agent: AgentRecord,
   ) {}
 
-  static load(db: HiveDatabase, provider?: Provider): HiveAgent {
+  static async load(db: HiveDatabase, provider?: Provider): Promise<HiveAgent> {
     const agent = getPrimaryAgent(db);
     if (!agent) {
       throw new Error("Hive is not initialized. Run `hive init` first.");
     }
 
-    const resolvedProvider = provider ?? createProvider(agent.provider);
+    const resolvedProvider = provider ?? (await createProvider(agent.provider));
     return new HiveAgent(db, resolvedProvider, agent);
   }
 

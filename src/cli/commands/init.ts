@@ -4,10 +4,10 @@ import chalk from "chalk";
 import { Command } from "commander";
 import inquirer from "inquirer";
 import keytar from "keytar";
-import fetch from "node-fetch";
 import ora from "ora";
 
 import { buildDefaultPersona } from "../../agent/agent.js";
+import { promptForModel, promptForProvider } from "../helpers/providerPrompts.js";
 import {
   closeHiveDatabase,
   getPrimaryAgent,
@@ -15,7 +15,7 @@ import {
   setMetaValue,
   upsertPrimaryAgent,
 } from "../../storage/db.js";
-import { SUPPORTED_PROVIDER_NAMES, type ProviderName } from "../../providers/base.js";
+import type { ProviderName } from "../../providers/base.js";
 
 interface InitAnswers {
   name: string;
@@ -29,28 +29,7 @@ interface InitAnswers {
   agentName?: string;
 }
 
-type HostedProviderName = Exclude<ProviderName, "ollama">;
-
 const KEYCHAIN_SERVICE = "hive";
-const OLLAMA_TAGS_URL = "http://localhost:11434/api/tags";
-
-const MODEL_CHOICES_BY_PROVIDER: Record<HostedProviderName, readonly string[]> = {
-  openai: ["gpt-4o", "gpt-4o-mini", "o1"],
-  anthropic: [
-    "claude-opus-4-6",
-    "claude-sonnet-4-6",
-    "claude-haiku-4-5-20251001",
-  ],
-  groq: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
-  mistral: ["mistral-large-latest", "mistral-small-latest", "codestral-latest"],
-};
-
-interface OllamaTagsResponse {
-  models?: Array<{
-    name?: string;
-    model?: string;
-  }>;
-}
 
 export function registerInitCommand(program: Command): void {
   program
@@ -178,18 +157,7 @@ async function askInitQuestions(): Promise<InitAnswers> {
     },
   ])) as { aboutRaw: string };
 
-  const { provider } = (await inquirer.prompt([
-    {
-      type: "list",
-      name: "provider",
-      message: "Choose a provider",
-      choices: SUPPORTED_PROVIDER_NAMES.map((value) => ({
-        name: value,
-        value,
-      })),
-    },
-  ])) as { provider: ProviderName };
-
+  const provider = await promptForProvider();
   const model = await promptForModel(provider);
 
   let apiKey: string | undefined;
@@ -226,104 +194,6 @@ async function askInitQuestions(): Promise<InitAnswers> {
     apiKey,
     agentName: normalizeOptional(agentName),
   };
-}
-
-async function promptForModel(provider: ProviderName): Promise<string> {
-  if (provider === "ollama") {
-    const ollamaModels = await fetchOllamaModels();
-
-    if (ollamaModels && ollamaModels.length > 0) {
-      const answer = (await inquirer.prompt([
-        {
-          type: "checkbox",
-          name: "model",
-          message: "Choose a model",
-          choices: ollamaModels.map((value) => ({
-            name: value,
-            value,
-          })),
-          validate: (values: string[]) =>
-            values.length === 1 || "Select exactly one model.",
-        },
-      ])) as { model: string[] };
-
-      return answer.model[0];
-    }
-
-    const fallbackMessage =
-      ollamaModels === null
-        ? "Ollama not detected. Enter model name manually:"
-        : "No local Ollama models found. Enter model name manually:";
-
-    const answer = (await inquirer.prompt([
-      {
-        type: "input",
-        name: "model",
-        message: fallbackMessage,
-        validate: requiredField("Model is required."),
-      },
-    ])) as { model: string };
-
-    return answer.model.trim();
-  }
-
-  const answer = (await inquirer.prompt([
-    {
-      type: "list",
-      name: "model",
-      message: "Choose a model",
-      choices: MODEL_CHOICES_BY_PROVIDER[provider].map((value) => ({
-        name: value,
-        value,
-      })),
-    },
-  ])) as { model: string };
-
-  return answer.model;
-}
-
-async function fetchOllamaModels(): Promise<string[] | null> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 1000);
-
-  try {
-    const response = await fetch(OLLAMA_TAGS_URL, {
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const payload = (await response.json()) as OllamaTagsResponse;
-    if (!Array.isArray(payload.models)) {
-      return [];
-    }
-
-    return Array.from(
-      new Set(
-        payload.models
-          .map((entry) => {
-            if (typeof entry.name === "string" && entry.name.trim().length > 0) {
-              return entry.name.trim();
-            }
-
-            if (typeof entry.model === "string" && entry.model.trim().length > 0) {
-              return entry.model.trim();
-            }
-
-            return "";
-          })
-          .filter((value) => value.length > 0),
-      ),
-    );
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 function requiredField(message: string): (value: string) => true | string {
