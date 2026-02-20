@@ -16,7 +16,8 @@ hive/
 │   │       ├── chat.ts       # hive chat
 │   │       ├── code.ts       # hive code
 │   │       ├── task.ts       # hive task
-│   │       ├── memory.ts     # hive memory
+│   │       ├── config.ts     # hive config
+|   |       ├── memory.ts     # hive memory
 │   │       ├── agents.ts     # hive agents
 │   │       ├── status.ts     # hive status
 │   │       ├── ui.ts         # hive ui
@@ -37,8 +38,9 @@ hive/
 │   │   ├── anthropic.ts
 │   │   ├── ollama.ts
 │   │   ├── groq.ts
-│   │   └── mistral.ts
-│   │
+│   │   ├── mistral.ts
+│   │   └── ...
+|   |   
 │   ├── storage/              # local storage layer
 │   │   ├── db.ts             # SQLite setup and migrations
 │   │   ├── keychain.ts       # OS keychain integration
@@ -94,6 +96,16 @@ npm run dev        # watch mode
 npm run build      # production build
 npm link           # use `hive` command globally
 ```
+
+---
+
+## CLI Commands
+
+- `hive init` — initialize local Hive state (`~/.hive`), create the primary agent profile, and store provider config.
+- `hive chat` — start an interactive chat session with your primary agent.
+- `hive config` — update provider/model/API key settings after initialization.
+- `hive status` — print current Hive status (agent, owner, provider/model, API key set/not set, database path + size, prompts file count, initialized date).
+- `hive nuke` — permanently delete `~/.hive` and remove stored `hive` keychain entries after typing `nuke` to confirm.
 
 ---
 

@@ -8,6 +8,8 @@ import { Command } from "commander";
 import { registerChatCommand } from "./commands/chat.js";
 import { registerConfigCommand } from "./commands/config.js";
 import { registerInitCommand } from "./commands/init.js";
+import { registerNukeCommand } from "./commands/nuke.js";
+import { registerStatusCommand } from "./commands/status.js";
 
 const program = new Command();
 
@@ -19,6 +21,8 @@ program
 registerInitCommand(program);
 registerChatCommand(program);
 registerConfigCommand(program);
+registerStatusCommand(program);
+registerNukeCommand(program);
 
 program
   .parseAsync(process.argv)
