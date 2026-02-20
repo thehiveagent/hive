@@ -16,11 +16,13 @@ Auto-generated symbol reference (truncated for readability).
 - `class` `TogetherProvider` in `src/providers/together.ts`:7:8
 - `function` `apiKeyEnvVar` in `src/cli/commands/config.ts`:247:1
 - `function` `appendMessage` in `src/storage/db.ts`:421:8
+- `function` `askInitQuestions` in `src/cli/commands/init.ts`:121:1
 - `function` `assertNever` in `src/cli/commands/config.ts`:280:1
 - `function` `assertNever` in `src/providers/index.ts`:63:1
 - `function` `buildDefaultPersona` in `src/agent/agent.ts`:147:8
 - `function` `closeHiveDatabase` in `src/storage/db.ts`:85:8
 - `function` `configureDatabase` in `src/storage/db.ts`:89:1
+- `function` `copyPromptsDirectory` in `src/cli/commands/init.ts`:223:1
 - `function` `createAnthropicProvider` in `src/providers/anthropic.ts`:98:8
 - `function` `createConversation` in `src/storage/db.ts`:362:8
 - `function` `createGoogleProvider` in `src/providers/google.ts`:18:8
@@ -47,6 +49,7 @@ Auto-generated symbol reference (truncated for readability).
 - `function` `getPrimaryAgent` in `src/storage/db.ts`:184:8
 - `function` `isHiveInitialized` in `src/storage/db.ts`:176:8
 - `function` `listMessages` in `src/storage/db.ts`:456:8
+- `function` `normalizeOptional` in `src/cli/commands/init.ts`:218:1
 - `function` `normalizeProviderName` in `src/providers/base.ts`:61:8
 - `function` `nowIso` in `src/storage/db.ts`:152:1
 - `function` `openHiveDatabase` in `src/storage/db.ts`:74:8
@@ -61,14 +64,17 @@ Auto-generated symbol reference (truncated for readability).
 - `function` `promptForProvider` in `src/cli/helpers/providerPrompts.ts`:49:8
 - `function` `registerChatCommand` in `src/cli/commands/chat.ts`:29:8
 - `function` `registerConfigCommand` in `src/cli/commands/config.ts`:23:8
+- `function` `registerInitCommand` in `src/cli/commands/init.ts`:41:8
 - `function` `requiredField` in `src/cli/commands/config.ts`:270:1
 - `function` `requiredField` in `src/cli/helpers/providerPrompts.ts`:184:1
+- `function` `requiredField` in `src/cli/commands/init.ts`:208:1
 - `function` `resolveProviderApiKey` in `src/providers/api-key.ts`:7:8
 - `function` `runChatCommand` in `src/cli/commands/chat.ts`:43:8
 - `function` `runConfigKeyCommand` in `src/cli/commands/config.ts`:165:8
 - `function` `runConfigModelCommand` in `src/cli/commands/config.ts`:124:8
 - `function` `runConfigProviderCommand` in `src/cli/commands/config.ts`:57:8
 - `function` `runConfigShowCommand` in `src/cli/commands/config.ts`:209:8
+- `function` `runInitCommand` in `src/cli/commands/init.ts`:51:8
 - `function` `runMigrations` in `src/storage/db.ts`:105:8
 - `function` `setMetaValue` in `src/storage/db.ts`:164:8
 - `function` `streamReply` in `src/cli/commands/chat.ts`:116:1
@@ -84,6 +90,8 @@ Auto-generated symbol reference (truncated for readability).
 - `interface` `ChatCommandOptions` in `src/cli/commands/chat.ts`:15:1
 - `interface` `ConversationRecord` in `src/storage/schema.ts`:102:8
 - `interface` `CreateConversationInput` in `src/storage/db.ts`:39:8
+- `interface` `InitAnswers` in `src/cli/commands/init.ts`:23:1
+- `interface` `InitCommandOptions` in `src/cli/commands/init.ts`:35:1
 - `interface` `MessageRecord` in `src/storage/schema.ts`:110:8
 - `interface` `MetaRecord` in `src/storage/schema.ts`:81:8
 - `interface` `OllamaTagsResponse` in `src/cli/helpers/providerPrompts.ts`:32:1
@@ -130,6 +138,7 @@ Auto-generated symbol reference (truncated for readability).
 - `variable` `agent` in `src/cli/commands/config.ts`:131:5
 - `variable` `agent` in `src/cli/commands/config.ts`:172:5
 - `variable` `agent` in `src/cli/commands/config.ts`:213:5
+- `variable` `agent` in `src/cli/commands/init.ts`:86:5
 - `variable` `AGENT_PROFILE_COLUMNS` in `src/storage/db.ts`:58:1
 - `variable` `answer` in `src/cli/commands/config.ts`:86:7
 - `variable` `answer` in `src/cli/commands/config.ts`:184:5
@@ -137,6 +146,8 @@ Auto-generated symbol reference (truncated for readability).
 - `variable` `answer` in `src/cli/helpers/providerPrompts.ts`:83:7
 - `variable` `answer` in `src/cli/helpers/providerPrompts.ts`:106:5
 - `variable` `answer` in `src/cli/helpers/providerPrompts.ts`:124:3
+- `variable` `answer` in `src/cli/commands/init.ts`:174:5
+- `variable` `answers` in `src/cli/commands/init.ts`:79:5
 - `variable` `ANTHROPIC_API_URL` in `src/providers/anthropic.ts`:13:1
 - `variable` `apiKey` in `src/cli/commands/config.ts`:84:5
 - `variable` `apiKey` in `src/cli/commands/config.ts`:243:3
@@ -148,6 +159,7 @@ Auto-generated symbol reference (truncated for readability).
 - `variable` `apiKey` in `src/providers/openai.ts`:19:3
 - `variable` `apiKey` in `src/providers/openrouter.ts`:19:3
 - `variable` `apiKey` in `src/providers/together.ts`:19:3
+- `variable` `apiKey` in `src/cli/commands/init.ts`:172:3
 - `variable` `appliedRows` in `src/storage/db.ts`:108:3
 - `variable` `appliedVersions` in `src/storage/db.ts`:111:3
 - `variable` `applyMigration` in `src/storage/db.ts`:118:5
@@ -172,6 +184,7 @@ Auto-generated symbol reference (truncated for readability).
 - `variable` `db` in `src/cli/commands/config.ts`:167:3
 - `variable` `db` in `src/cli/commands/config.ts`:210:3
 - `variable` `db` in `src/storage/db.ts`:77:3
+- `variable` `db` in `src/cli/commands/init.ts`:53:3
 - `variable` `DEFAULT_ANTHROPIC_MODEL` in `src/providers/anthropic.ts`:14:1
 - `variable` `DEFAULT_GOOGLE_BASE_URL` in `src/providers/google.ts`:4:1
 - `variable` `DEFAULT_GOOGLE_MODEL` in `src/providers/google.ts`:5:1
@@ -192,6 +205,7 @@ Auto-generated symbol reference (truncated for readability).
 - `variable` `delta` in `src/providers/anthropic.ts`:124:5
 - `variable` `delta` in `src/providers/anthropic.ts`:131:5
 - `variable` `delta` in `src/providers/base.ts`:134:5
+- `variable` `destinationPath` in `src/cli/commands/init.ts`:225:3
 - `variable` `details` in `src/providers/base.ts`:229:3
 - `variable` `endpoint` in `src/providers/base.ts`:79:3
 - `variable` `error` in `src/providers/anthropic.ts`:81:9
@@ -200,6 +214,7 @@ Auto-generated symbol reference (truncated for readability).
 - `variable` `existing` in `src/storage/db.ts`:215:3
 - `variable` `existing` in `src/storage/db.ts`:318:3
 - `variable` `existing` in `src/storage/db.ts`:330:3
+- `variable` `existing` in `src/cli/commands/init.ts`:60:5
 - `variable` `existingColumns` in `src/storage/db.ts`:141:3
 - `variable` `existingConversation` in `src/agent/agent.ts`:134:5
 - `variable` `fallbackMessage` in `src/cli/helpers/providerPrompts.ts`:101:5
@@ -213,8 +228,16 @@ Auto-generated symbol reference (truncated for readability).
 - `variable` `id` in `src/storage/db.ts`:366:3
 - `variable` `id` in `src/storage/db.ts`:425:3
 - `variable` `initialSchemaSql` in `src/storage/schema.ts`:13:1
+- `variable` `inquirer` in `src/cli/commands/init.ts`:64:7
+- `variable` `inquirer` in `src/cli/commands/init.ts`:122:3
+- `variable` `inquirer` in `src/cli/commands/init.ts`:131:3
+- `variable` `inquirer` in `src/cli/commands/init.ts`:141:3
+- `variable` `inquirer` in `src/cli/commands/init.ts`:150:3
+- `variable` `inquirer` in `src/cli/commands/init.ts`:159:3
+- `variable` `inquirer` in `src/cli/commands/init.ts`:187:3
 - `variable` `KEYCHAIN_SERVICE` in `src/cli/commands/config.ts`:21:1
 - `variable` `KEYCHAIN_SERVICE` in `src/providers/api-key.ts`:5:1
+- `variable` `KEYCHAIN_SERVICE` in `src/cli/commands/init.ts`:39:1
 - `variable` `keychainValue` in `src/providers/api-key.ts`:11:3
 - `variable` `keyStatus` in `src/cli/commands/config.ts`:220:5
 - `variable` `lines` in `src/providers/base.ts`:186:3
@@ -227,6 +250,7 @@ Auto-generated symbol reference (truncated for readability).
 - `variable` `MIGRATIONS` in `src/storage/schema.ts`:62:8
 - `variable` `model` in `src/cli/commands/config.ts`:80:5
 - `variable` `model` in `src/cli/commands/config.ts`:144:5
+- `variable` `model` in `src/cli/commands/init.ts`:170:3
 - `variable` `MODEL_CHOICES_BY_PROVIDER` in `src/cli/helpers/providerPrompts.ts`:10:1
 - `variable` `modelChoices` in `src/cli/helpers/providerPrompts.ts`:118:3
 - `variable` `normalized` in `src/providers/base.ts`:66:3
@@ -237,7 +261,6 @@ Auto-generated symbol reference (truncated for readability).
 - `variable` `payload` in `src/providers/anthropic.ts`:75:7
 - `variable` `payload` in `src/providers/base.ts`:118:5
 - `variable` `profile` in `src/cli/commands/chat.ts`:48:5
-- `variable` `program` in `src/cli/index.ts`:12:1
 - `variable` `prompt` in `src/cli/commands/chat.ts`:85:9
 - `variable` `promptMessage` in `src/cli/helpers/providerPrompts.ts`:72:3
 - `variable` `provider` in `src/cli/commands/chat.ts`:54:5
@@ -245,6 +268,7 @@ Auto-generated symbol reference (truncated for readability).
 - `variable` `provider` in `src/cli/commands/config.ts`:138:5
 - `variable` `provider` in `src/cli/commands/config.ts`:179:5
 - `variable` `provider` in `src/cli/commands/config.ts`:219:5
+- `variable` `provider` in `src/cli/commands/init.ts`:169:3
 - `variable` `providerRequest` in `src/agent/agent.ts`:84:5
 - `variable` `rawEvent` in `src/providers/base.ts`:161:7
 - `variable` `remaining` in `src/providers/base.ts`:173:3
@@ -261,9 +285,11 @@ Auto-generated symbol reference (truncated for readability).
 - `variable` `row` in `src/storage/db.ts`:406:3
 - `variable` `runOptions` in `src/cli/commands/chat.ts`:58:5
 - `variable` `savedMessage` in `src/agent/agent.ts`:110:5
+- `variable` `sourcePath` in `src/cli/commands/init.ts`:224:3
 - `variable` `spinner` in `src/cli/commands/config.ts`:58:3
 - `variable` `spinner` in `src/cli/commands/config.ts`:125:3
 - `variable` `spinner` in `src/cli/commands/config.ts`:166:3
+- `variable` `spinner` in `src/cli/commands/init.ts`:52:3
 - `variable` `start` in `src/providers/base.ts`:180:8
 - `variable` `SUPPORTED_PROVIDER_NAMES` in `src/providers/base.ts`:3:8
 - `variable` `system` in `src/providers/anthropic.ts`:39:5
@@ -277,6 +303,7 @@ Auto-generated symbol reference (truncated for readability).
 - `variable` `timestamp` in `src/storage/db.ts`:367:3
 - `variable` `timestamp` in `src/storage/db.ts`:426:3
 - `variable` `trimmed` in `src/agent/agent.ts`:70:5
+- `variable` `trimmed` in `src/cli/commands/init.ts`:219:3
 - `variable` `updatedAgent` in `src/cli/commands/config.ts`:101:5
 - `variable` `updatedAgent` in `src/cli/commands/config.ts`:150:5
 - `variable` `writeMessage` in `src/storage/db.ts`:428:3

@@ -28,7 +28,7 @@ Your agent knows who you are, works for you while you sleep, connects to every t
 ## Install
 
 ```bash
-curl https://thehive.sh/install | sh
+npm install -g @misbahk/hive
 ```
 
 Or build from source:

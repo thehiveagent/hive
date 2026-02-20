@@ -1,10 +1,10 @@
 {
-    "name": "@hive/cli",
+    "name": "@imisbahk/hive",
     "version": "0.1.0",
     "description": "Your agent. Always running. Always learning. Always working.",
     "type": "module",
     "bin": {
-        "hive": "./dist/cli/index.js"
+        "hive": "dist/cli/index.js"
     },
     "scripts": {
         "dev": "tsc --watch",
