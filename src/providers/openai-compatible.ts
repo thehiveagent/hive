@@ -1,4 +1,7 @@
 import {
+  completeOpenAICompatibleChat,
+  type CompleteChatRequest,
+  type CompleteChatResponse,
   ProviderConfigurationError,
   type Provider,
   type ProviderName,
@@ -51,6 +54,27 @@ export class OpenAICompatibleProvider implements Provider {
       messages: request.messages,
       temperature: request.temperature,
       maxTokens: request.maxTokens,
+      extraHeaders: this.extraHeaders,
+      extraBody: this.extraBody,
+    });
+  }
+
+  async completeChat(request: CompleteChatRequest): Promise<CompleteChatResponse> {
+    if (!this.allowMissingApiKey && !this.apiKey) {
+      throw new ProviderConfigurationError(
+        `Provider \"${this.name}\" is missing an API key.`,
+      );
+    }
+
+    return completeOpenAICompatibleChat({
+      provider: this.name,
+      baseUrl: this.baseUrl,
+      apiKey: this.apiKey,
+      model: request.model ?? this.defaultModel,
+      messages: request.messages,
+      temperature: request.temperature,
+      maxTokens: request.maxTokens,
+      tools: request.tools,
       extraHeaders: this.extraHeaders,
       extraBody: this.extraBody,
     });

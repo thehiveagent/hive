@@ -2,7 +2,6 @@
 
 import "dotenv/config";
 
-import chalk from "chalk";
 import { Command } from "commander";
 
 import { registerChatCommand } from "./commands/chat.js";
@@ -10,6 +9,7 @@ import { registerConfigCommand } from "./commands/config.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerNukeCommand } from "./commands/nuke.js";
 import { registerStatusCommand } from "./commands/status.js";
+import { renderError } from "./ui.js";
 
 const program = new Command();
 
@@ -28,11 +28,11 @@ program
   .parseAsync(process.argv)
   .catch((error: unknown) => {
     if (error instanceof Error) {
-      console.error(chalk.red(error.message));
+      renderError(error.message);
       process.exitCode = 1;
       return;
     }
 
-    console.error(chalk.red(String(error)));
+    renderError(String(error));
     process.exitCode = 1;
   });

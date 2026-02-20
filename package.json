@@ -34,6 +34,7 @@
         "node-fetch": "^3.3.2",
         "openai": "^4.28.0",
         "ora": "^8.0.1",
+        "playwright": "^1.58.2",
         "uuid": "^9.0.1"
     },
     "devDependencies": {
@@ -49,5 +50,5 @@
     "repository": {
         "type": "git",
         "url": "https://github.com/imisbahk/hive.git"
-    } 
+    }
 }

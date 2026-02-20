@@ -2,12 +2,17 @@ import * as fs from "node:fs";
 import { stdin, stdout } from "node:process";
 import { createInterface } from "node:readline/promises";
 
-import chalk from "chalk";
 import { Command } from "commander";
 import keytar from "keytar";
 
 import { SUPPORTED_PROVIDER_NAMES } from "../../providers/base.js";
 import { getHiveHomeDir } from "../../storage/db.js";
+import {
+  renderError,
+  renderHiveHeader,
+  renderInfo,
+  renderSuccess,
+} from "../ui.js";
 
 const KEYCHAIN_SERVICE = "hive";
 const NUKE_CONFIRMATION = "nuke";
@@ -22,10 +27,9 @@ export function registerNukeCommand(program: Command): void {
 }
 
 export async function runNukeCommand(): Promise<void> {
-  console.log(
-    chalk.red(
-      "This will permanently delete your agent, all memory, all conversations, and all keys. This cannot be undone.",
-    ),
+  renderHiveHeader();
+  renderError(
+    "This will permanently delete your agent, all memory, all conversations, and all keys. This cannot be undone.",
   );
 
   const rl = createInterface({
@@ -42,7 +46,7 @@ export async function runNukeCommand(): Promise<void> {
   }
 
   if (confirmation !== NUKE_CONFIRMATION) {
-    console.log(chalk.dim("Aborted."));
+    renderInfo("Aborted.");
     return;
   }
 
@@ -56,5 +60,5 @@ export async function runNukeCommand(): Promise<void> {
     }
   }
 
-  console.log(chalk.green("The Hive has been nuked. Gone."));
+  renderSuccess("The Hive has been nuked. Gone.");
 }

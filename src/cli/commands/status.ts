@@ -5,6 +5,12 @@ import { join } from "node:path";
 import chalk from "chalk";
 import { Command } from "commander";
 import keytar from "keytar";
+import {
+  renderHiveHeader,
+  renderInfo,
+  renderSeparator,
+  renderStep,
+} from "../ui.js";
 
 import {
   closeHiveDatabase,
@@ -28,12 +34,13 @@ export function registerStatusCommand(program: Command): void {
 }
 
 export async function runStatusCommand(): Promise<void> {
+  renderHiveHeader();
   const db = openHiveDatabase();
 
   try {
     const agent = getPrimaryAgent(db);
     if (!agent) {
-      console.log("Hive is not initialized. Run `hive init` to get started.");
+      renderInfo("Hive is not initialized. Run `hive init` to get started.");
       return;
     }
 
@@ -45,14 +52,14 @@ export async function runStatusCommand(): Promise<void> {
     const promptFiles = countFiles(promptsPath);
     const initializedRaw = getMetaValue(db, "initialized_at") ?? agent.created_at;
 
-    console.log(chalk.whiteBright("🐝 The Hive — Status"));
-    console.log();
+    renderStep("Status");
+    renderSeparator();
     printStatusLine("Agent", agent.agent_name ?? "not set");
     printStatusLine("Owner", agent.name);
     printStatusLine("Provider", provider);
     printStatusLine("Model", agent.model);
     printStatusLine("API Key", keyStatus);
-    console.log();
+    renderSeparator();
     printStatusLine(
       "Database",
       `${displayPath(dbPath)} (${formatBytes(dbSizeBytes)})`,
@@ -61,7 +68,7 @@ export async function runStatusCommand(): Promise<void> {
       "Prompts",
       `${ensureTrailingSlash(displayPath(promptsPath))} (${promptFiles} files)`,
     );
-    console.log();
+    renderSeparator();
     printStatusLine("Initialized", formatDate(initializedRaw));
   } finally {
     closeHiveDatabase(db);

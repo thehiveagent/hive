@@ -1,6 +1,5 @@
 import process from "node:process";
 
-import chalk from "chalk";
 import { Command } from "commander";
 import inquirer from "inquirer";
 import keytar from "keytar";
@@ -9,6 +8,13 @@ import ora from "ora";
 import { resolveProviderApiKey } from "../../providers/api-key.js";
 import { normalizeProviderName, type ProviderName } from "../../providers/base.js";
 import { promptForModel, promptForProvider } from "../helpers/providerPrompts.js";
+import {
+  renderError,
+  renderHiveHeader,
+  renderInfo,
+  renderStep,
+  renderSuccess,
+} from "../ui.js";
 import {
   closeHiveDatabase,
   getPrimaryAgent,
@@ -52,9 +58,15 @@ export function registerConfigCommand(program: Command): void {
     .action(async () => {
       await runConfigShowCommand();
     });
+
+  configCommand.action(() => {
+    renderHiveHeader();
+    configCommand.outputHelp();
+  });
 }
 
 export async function runConfigProviderCommand(): Promise<void> {
+  renderHiveHeader();
   const spinner = ora("Loading configuration...").start();
   const db = openHiveDatabase();
 
@@ -64,7 +76,7 @@ export async function runConfigProviderCommand(): Promise<void> {
     const agent = getPrimaryAgent(db);
     if (!agent) {
       spinner.stop();
-      console.error(chalk.red("Hive is not initialized. Run `hive init` first."));
+      renderError("Hive is not initialized. Run `hive init` first.");
       return;
     }
 
@@ -110,7 +122,8 @@ export async function runConfigProviderCommand(): Promise<void> {
     }
 
     spinner.succeed("Configuration saved.");
-    console.log("Provider updated. Run `hive chat` to use it.");
+    renderSuccess("Provider updated.");
+    renderStep("Run `hive chat` to use it.");
   } catch (error) {
     if (spinner.isSpinning) {
       spinner.fail("Failed to update provider configuration.");
@@ -122,6 +135,7 @@ export async function runConfigProviderCommand(): Promise<void> {
 }
 
 export async function runConfigModelCommand(): Promise<void> {
+  renderHiveHeader();
   const spinner = ora("Loading configuration...").start();
   const db = openHiveDatabase();
 
@@ -131,7 +145,7 @@ export async function runConfigModelCommand(): Promise<void> {
     const agent = getPrimaryAgent(db);
     if (!agent) {
       spinner.stop();
-      console.error(chalk.red("Hive is not initialized. Run `hive init` first."));
+      renderError("Hive is not initialized. Run `hive init` first.");
       return;
     }
 
@@ -151,7 +165,8 @@ export async function runConfigModelCommand(): Promise<void> {
     setMetaValue(db, "model", updatedAgent.model);
 
     spinner.succeed("Configuration saved.");
-    console.log("Model updated. Run `hive chat` to use it.");
+    renderSuccess("Model updated.");
+    renderStep("Run `hive chat` to use it.");
   } catch (error) {
     if (spinner.isSpinning) {
       spinner.fail("Failed to update model configuration.");
@@ -163,6 +178,7 @@ export async function runConfigModelCommand(): Promise<void> {
 }
 
 export async function runConfigKeyCommand(): Promise<void> {
+  renderHiveHeader();
   const spinner = ora("Loading configuration...").start();
   const db = openHiveDatabase();
 
@@ -172,14 +188,14 @@ export async function runConfigKeyCommand(): Promise<void> {
     const agent = getPrimaryAgent(db);
     if (!agent) {
       spinner.stop();
-      console.error(chalk.red("Hive is not initialized. Run `hive init` first."));
+      renderError("Hive is not initialized. Run `hive init` first.");
       return;
     }
 
     const provider = normalizeProviderName(agent.provider);
 
     spinner.stop();
-    console.log(chalk.dim(`Current provider: ${provider}`));
+    renderInfo(`Current provider: ${provider}`);
 
     const answer = (await inquirer.prompt([
       {
@@ -195,7 +211,8 @@ export async function runConfigKeyCommand(): Promise<void> {
     await keytar.setPassword(KEYCHAIN_SERVICE, provider, answer.apiKey.trim());
 
     spinner.succeed("Configuration saved.");
-    console.log("API key updated. Run `hive chat` to use it.");
+    renderSuccess("API key updated.");
+    renderStep("Run `hive chat` to use it.");
   } catch (error) {
     if (spinner.isSpinning) {
       spinner.fail("Failed to update API key.");
@@ -207,22 +224,23 @@ export async function runConfigKeyCommand(): Promise<void> {
 }
 
 export async function runConfigShowCommand(): Promise<void> {
+  renderHiveHeader();
   const db = openHiveDatabase();
 
   try {
     const agent = getPrimaryAgent(db);
     if (!agent) {
-      console.error(chalk.red("Hive is not initialized. Run `hive init` first."));
+      renderError("Hive is not initialized. Run `hive init` first.");
       return;
     }
 
     const provider = normalizeProviderName(agent.provider);
     const keyStatus = await getKeyStatus(provider);
 
-    console.log(`Provider: ${provider}`);
-    console.log(`Model: ${agent.model}`);
-    console.log(`Agent name: ${agent.agent_name ?? "not set"}`);
-    console.log(`API key: ${keyStatus}`);
+    renderStep(`Provider: ${provider}`);
+    renderStep(`Model: ${agent.model}`);
+    renderStep(`Agent name: ${agent.agent_name ?? "not set"}`);
+    renderStep(`API key: ${keyStatus}`);
   } finally {
     closeHiveDatabase(db);
   }
@@ -235,8 +253,8 @@ function ensureInteractiveTerminal(errorMessage: string): void {
 }
 
 function printCurrentProviderAndModel(provider: ProviderName, model: string): void {
-  console.log(chalk.dim(`Current provider: ${provider}`));
-  console.log(chalk.dim(`Current model: ${model}`));
+  renderInfo(`Current provider: ${provider}`);
+  renderInfo(`Current model: ${model}`);
 }
 
 async function getKeyStatus(provider: ProviderName): Promise<"set" | "not set"> {

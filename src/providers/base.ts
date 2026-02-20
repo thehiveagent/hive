@@ -12,11 +12,38 @@ export const SUPPORTED_PROVIDER_NAMES = [
 ] as const;
 
 export type ProviderName = (typeof SUPPORTED_PROVIDER_NAMES)[number];
-export type ProviderMessageRole = "system" | "user" | "assistant";
+export type ProviderMessageRole = "system" | "user" | "assistant" | "tool";
+
+export interface ProviderToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+export interface ProviderToolCallPayload {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface ProviderToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
 
 export interface ProviderMessage {
   role: ProviderMessageRole;
   content: string;
+  name?: string;
+  tool_call_id?: string;
+  tool_calls?: ProviderToolCallPayload[];
 }
 
 export interface StreamChatRequest {
@@ -26,10 +53,20 @@ export interface StreamChatRequest {
   maxTokens?: number;
 }
 
+export interface CompleteChatRequest extends StreamChatRequest {
+  tools?: ProviderToolDefinition[];
+}
+
+export interface CompleteChatResponse {
+  content: string;
+  toolCalls: ProviderToolCall[];
+}
+
 export interface Provider {
   readonly name: ProviderName;
   readonly defaultModel: string;
   streamChat(request: StreamChatRequest): AsyncGenerator<string>;
+  completeChat?(request: CompleteChatRequest): Promise<CompleteChatResponse>;
 }
 
 export class ProviderConfigurationError extends Error {
@@ -56,6 +93,10 @@ export interface OpenAICompatibleStreamInput {
   maxTokens?: number;
   extraHeaders?: Record<string, string>;
   extraBody?: Record<string, unknown>;
+}
+
+export interface OpenAICompatibleCompleteInput extends OpenAICompatibleStreamInput {
+  tools?: ProviderToolDefinition[];
 }
 
 export function normalizeProviderName(raw?: string): ProviderName {
@@ -146,6 +187,71 @@ export async function* streamOpenAICompatibleChat(
   }
 }
 
+export async function completeOpenAICompatibleChat(
+  input: OpenAICompatibleCompleteInput,
+): Promise<CompleteChatResponse> {
+  const endpoint = `${input.baseUrl.replace(/\/$/, "")}/chat/completions`;
+
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    ...(input.extraHeaders ?? {}),
+  };
+
+  if (input.apiKey) {
+    headers.authorization = `Bearer ${input.apiKey}`;
+  }
+
+  const body: Record<string, unknown> = {
+    model: input.model,
+    messages: input.messages,
+    stream: false,
+    ...(input.extraBody ?? {}),
+  };
+
+  if (input.temperature !== undefined) {
+    body.temperature = input.temperature;
+  }
+
+  if (input.maxTokens !== undefined) {
+    body.max_tokens = input.maxTokens;
+  }
+
+  if (input.tools && input.tools.length > 0) {
+    body.tools = input.tools;
+    body.tool_choice = "auto";
+  }
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  await ensureOk(response, `${input.provider} request failed`);
+
+  const payload = (await response.json()) as Record<string, unknown>;
+  const errorMessage = pickErrorMessage(payload);
+  if (errorMessage) {
+    throw new ProviderRequestError(`${input.provider} error: ${errorMessage}`);
+  }
+
+  const maybeChoices = payload.choices;
+  if (!Array.isArray(maybeChoices) || maybeChoices.length === 0) {
+    throw new ProviderRequestError(`${input.provider} response did not include choices.`);
+  }
+
+  const firstChoice = maybeChoices[0] as Record<string, unknown>;
+  const message = firstChoice.message as Record<string, unknown> | undefined;
+
+  const content = pickMessageContent(message);
+  const toolCalls = pickToolCalls(message);
+
+  return {
+    content,
+    toolCalls,
+  };
+}
+
 export async function* iterateSseData(response: Response): AsyncGenerator<string> {
   if (!response.body) {
     return;
@@ -218,6 +324,75 @@ function pickErrorMessage(payload: Record<string, unknown>): string | null {
   }
 
   return null;
+}
+
+function pickMessageContent(message: Record<string, unknown> | undefined): string {
+  if (!message) {
+    return "";
+  }
+
+  const rawContent = message.content;
+  if (typeof rawContent === "string") {
+    return rawContent;
+  }
+
+  if (Array.isArray(rawContent)) {
+    return rawContent
+      .map((part) => {
+        if (typeof part === "string") {
+          return part;
+        }
+
+        if (part && typeof part === "object") {
+          const asRecord = part as Record<string, unknown>;
+          if (typeof asRecord.text === "string") {
+            return asRecord.text;
+          }
+        }
+
+        return "";
+      })
+      .join("");
+  }
+
+  return "";
+}
+
+function pickToolCalls(message: Record<string, unknown> | undefined): ProviderToolCall[] {
+  if (!message) {
+    return [];
+  }
+
+  const rawToolCalls = message.tool_calls;
+  if (!Array.isArray(rawToolCalls)) {
+    return [];
+  }
+
+  const calls: ProviderToolCall[] = [];
+  for (const toolCall of rawToolCalls) {
+    if (!toolCall || typeof toolCall !== "object") {
+      continue;
+    }
+
+    const callRecord = toolCall as Record<string, unknown>;
+    const callId = typeof callRecord.id === "string" ? callRecord.id : "";
+    const callFunction = callRecord.function as Record<string, unknown> | undefined;
+    const callName = typeof callFunction?.name === "string" ? callFunction.name : "";
+    const callArguments =
+      typeof callFunction?.arguments === "string" ? callFunction.arguments : "{}";
+
+    if (callId.length === 0 || callName.length === 0) {
+      continue;
+    }
+
+    calls.push({
+      id: callId,
+      name: callName,
+      arguments: callArguments,
+    });
+  }
+
+  return calls;
 }
 
 async function ensureOk(response: Response, fallbackMessage: string): Promise<void> {

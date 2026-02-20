@@ -3,6 +3,7 @@ import type {
   ConversationRecord,
   HiveDatabase,
 } from "../storage/db.js";
+import { openPage, search, type SearchResult } from "../browser/browser.js";
 import {
   appendMessage,
   createConversation,
@@ -10,8 +11,39 @@ import {
   getPrimaryAgent,
   listMessages,
 } from "../storage/db.js";
-import type { Provider, StreamChatRequest } from "../providers/base.js";
+import {
+  chunkText,
+  type Provider,
+  type ProviderMessage,
+  type ProviderToolCall,
+  type ProviderToolCallPayload,
+  type ProviderToolDefinition,
+  type StreamChatRequest,
+} from "../providers/base.js";
 import { createProvider } from "../providers/index.js";
+
+const BROWSE_COMMAND_PATTERN = /^\/browse\s+(\S+)(?:\s+([\s\S]+))?$/i;
+const SEARCH_COMMAND_PATTERN = /^\/search\s+([\s\S]+)$/i;
+const URL_PATTERN = /(https?:\/\/[^\s]+)/i;
+const MAX_TOOL_CALL_ROUNDS = 4;
+const WEB_SEARCH_TOOL: ProviderToolDefinition = {
+  type: "function",
+  function: {
+    name: "web_search",
+    description: "Search the public web for current information.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "The query string to search for.",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+};
 
 export interface AgentChatOptions {
   conversationId?: string;
@@ -98,7 +130,7 @@ export class HiveAgent {
     };
 
     let assistantText = "";
-    for await (const token of this.provider.streamChat(providerRequest)) {
+    for await (const token of this.generateAssistantReply(providerRequest)) {
       assistantText += token;
       yield {
         type: "token",
@@ -142,6 +174,97 @@ export class HiveAgent {
 
     return existingConversation;
   }
+
+  private async *generateAssistantReply(
+    providerRequest: StreamChatRequest,
+  ): AsyncGenerator<string> {
+    if (!this.provider.completeChat) {
+      yield* this.provider.streamChat(providerRequest);
+      return;
+    }
+
+    const assistantText = await this.completeWithAutomaticTools(providerRequest);
+    yield* chunkText(assistantText);
+  }
+
+  private async completeWithAutomaticTools(
+    providerRequest: StreamChatRequest,
+  ): Promise<string> {
+    const completeChat = this.provider.completeChat;
+    if (!completeChat) {
+      let fallbackText = "";
+      for await (const token of this.provider.streamChat(providerRequest)) {
+        fallbackText += token;
+      }
+      return fallbackText;
+    }
+
+    const messages: ProviderMessage[] = providerRequest.messages.map((message) => ({
+      ...message,
+    }));
+
+    for (let round = 0; round < MAX_TOOL_CALL_ROUNDS; round += 1) {
+      const completion = await completeChat.call(this.provider, {
+        model: providerRequest.model,
+        temperature: providerRequest.temperature,
+        maxTokens: providerRequest.maxTokens,
+        messages,
+        tools: [WEB_SEARCH_TOOL],
+      });
+
+      if (completion.toolCalls.length === 0) {
+        return completion.content;
+      }
+
+      messages.push({
+        role: "assistant",
+        content: completion.content,
+        tool_calls: toToolCallPayloads(completion.toolCalls),
+      });
+
+      const toolResponses = await this.executeToolCalls(completion.toolCalls);
+      messages.push(...toolResponses);
+    }
+
+    return "I could not complete all required tool calls. Please try again.";
+  }
+
+  private async executeToolCalls(toolCalls: ProviderToolCall[]): Promise<ProviderMessage[]> {
+    const toolMessages: ProviderMessage[] = [];
+
+    for (const toolCall of toolCalls) {
+      if (toolCall.name !== "web_search") {
+        toolMessages.push({
+          role: "tool",
+          name: toolCall.name,
+          tool_call_id: toolCall.id,
+          content: `Unsupported tool: ${toolCall.name}`,
+        });
+        continue;
+      }
+
+      const query = parseWebSearchQuery(toolCall.arguments);
+      if (!query) {
+        toolMessages.push({
+          role: "tool",
+          name: toolCall.name,
+          tool_call_id: toolCall.id,
+          content: "Invalid search arguments. Expected JSON with a non-empty `query` field.",
+        });
+        continue;
+      }
+
+      const searchResult = await safelySearch(query);
+      toolMessages.push({
+        role: "tool",
+        name: toolCall.name,
+        tool_call_id: toolCall.id,
+        content: formatSearchResults(searchResult),
+      });
+    }
+
+    return toolMessages;
+  }
 }
 
 export function buildDefaultPersona(ownerName: string): string {
@@ -152,4 +275,157 @@ export function buildDefaultPersona(ownerName: string): string {
     "Prefer concrete actions over abstract advice.",
     "If context is missing, ask one concise clarifying question.",
   ].join("\n");
+}
+
+export async function buildBrowserAugmentedPrompt(userPrompt: string): Promise<string> {
+  const browsePrompt = await handleBrowseSlashCommand(userPrompt);
+  if (browsePrompt) {
+    return browsePrompt;
+  }
+
+  const searchPrompt = await handleSearchSlashCommand(userPrompt);
+  if (searchPrompt) {
+    return searchPrompt;
+  }
+
+  const urlMatch = userPrompt.match(URL_PATTERN);
+  if (!urlMatch) {
+    return userPrompt;
+  }
+
+  const detectedUrl = normalizeUrlToken(urlMatch[1]);
+  return buildBrowserContextMessage({
+    sourceLabel: `Browser content from ${detectedUrl}`,
+    userPrompt,
+    content: await safelyOpenPage(detectedUrl),
+  });
+}
+
+export async function handleBrowseSlashCommand(
+  userPrompt: string,
+): Promise<string | null> {
+  const match = userPrompt.trim().match(BROWSE_COMMAND_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  const candidateUrl = match[1];
+  const normalizedUrl = normalizeUrlToken(candidateUrl);
+  return buildBrowserContextMessage({
+    sourceLabel: `Browser content from ${normalizedUrl}`,
+    userPrompt,
+    content: await safelyOpenPage(normalizedUrl),
+  });
+}
+
+export async function handleSearchSlashCommand(
+  userPrompt: string,
+): Promise<string | null> {
+  const match = userPrompt.trim().match(SEARCH_COMMAND_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  const query = match[1].trim();
+  if (query.length === 0) {
+    return buildBrowserContextMessage({
+      sourceLabel: "Search error",
+      userPrompt,
+      content: "Search query is empty. Use `/search <query>`.",
+    });
+  }
+
+  const results = await safelySearch(query);
+  return buildBrowserContextMessage({
+    sourceLabel: `Search results for \"${query}\"`,
+    userPrompt,
+    content: formatSearchResults(results),
+  });
+}
+
+function buildBrowserContextMessage(input: {
+  sourceLabel: string;
+  content: string;
+  userPrompt: string;
+}): string {
+  return `[${input.sourceLabel}]:\n${input.content}\n\nUser question: ${input.userPrompt}`;
+}
+
+async function safelyOpenPage(url: string): Promise<string> {
+  try {
+    return await openPage(url);
+  } catch (error) {
+    return `Unable to read that page right now. ${errorMessage(error)}`;
+  }
+}
+
+async function safelySearch(query: string): Promise<SearchResult[] | string> {
+  try {
+    return await search(query);
+  } catch (error) {
+    return `Unable to search the web right now. ${errorMessage(error)}`;
+  }
+}
+
+function formatSearchResults(results: SearchResult[] | string): string {
+  if (typeof results === "string") {
+    return results;
+  }
+
+  if (results.length === 0) {
+    return "No search results found.";
+  }
+
+  return results
+    .map((result, index) => {
+      const snippet = result.snippet.length > 0 ? result.snippet : "(no snippet)";
+      return `${index + 1}. ${result.title}\nURL: ${result.url}\nSnippet: ${snippet}`;
+    })
+    .join("\n\n");
+}
+
+function normalizeUrlToken(value: string): string {
+  return value.trim().replace(/[),.;!?]+$/, "");
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
+function toToolCallPayloads(toolCalls: ProviderToolCall[]): ProviderToolCallPayload[] {
+  return toolCalls.map((toolCall) => ({
+    id: toolCall.id,
+    type: "function",
+    function: {
+      name: toolCall.name,
+      arguments: toolCall.arguments,
+    },
+  }));
+}
+
+function parseWebSearchQuery(rawArguments: string): string | null {
+  const trimmed = rawArguments.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    const query = parsed.query;
+    if (typeof query === "string" && query.trim().length > 0) {
+      return query.trim();
+    }
+  } catch {
+    // Fall through to plain-string handling below.
+  }
+
+  if (trimmed.length > 0 && !trimmed.startsWith("{")) {
+    return trimmed;
+  }
+
+  return null;
 }

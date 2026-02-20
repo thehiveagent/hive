@@ -2,7 +2,6 @@ import process from "node:process";
 import * as fs from "node:fs";
 import { join } from "node:path";
 
-import chalk from "chalk";
 import { Command } from "commander";
 import inquirer from "inquirer";
 import keytar from "keytar";
@@ -10,6 +9,12 @@ import ora from "ora";
 
 import { buildDefaultPersona } from "../../agent/agent.js";
 import { promptForModel, promptForProvider } from "../helpers/providerPrompts.js";
+import {
+  renderHiveHeader,
+  renderInfo,
+  renderStep,
+  renderSuccess,
+} from "../ui.js";
 import {
   closeHiveDatabase,
   getHiveHomeDir,
@@ -49,6 +54,7 @@ export function registerInitCommand(program: Command): void {
 }
 
 export async function runInitCommand(options: InitCommandOptions = {}): Promise<void> {
+  renderHiveHeader();
   const spinner = ora("Preparing init...").start();
   const db = openHiveDatabase();
 
@@ -71,7 +77,7 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
       ])) as { reinitialize: boolean };
 
       if (!reinitialize) {
-        console.log(chalk.dim("Initialization cancelled."));
+        renderInfo("Initialization cancelled.");
         return;
       }
     }
@@ -101,13 +107,13 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
     copyPromptsDirectory(options.force ?? false);
 
     spinner.succeed("Initialization complete.");
-    console.log(chalk.green(`HIVE-ID: ${agent.id}`));
+    renderSuccess(`HIVE-ID: ${agent.id}`);
     if (agent.agent_name) {
-      console.log(chalk.green(`Agent name: ${agent.agent_name}`));
+      renderSuccess(`Agent name: ${agent.agent_name}`);
     }
-    console.log(chalk.green(`Provider: ${agent.provider}`));
-    console.log(chalk.green(`Model: ${agent.model}`));
-    console.log("Run `hive chat` to start talking.");
+    renderSuccess(`Provider: ${agent.provider}`);
+    renderSuccess(`Model: ${agent.model}`);
+    renderStep("Run `hive chat` to start talking.");
   } catch (error) {
     if (spinner.isSpinning) {
       spinner.fail("Hive initialization failed.");
@@ -225,7 +231,7 @@ function copyPromptsDirectory(force: boolean): void {
   const destinationPath = join(getHiveHomeDir(), "prompts");
 
   if (!fs.existsSync(sourcePath)) {
-    console.warn(chalk.yellow("Warning: prompts/ folder not found. Skipping prompts load."));
+    renderInfo("Warning: prompts/ folder not found. Skipping prompts load.");
     return;
   }
 
@@ -238,5 +244,5 @@ function copyPromptsDirectory(force: boolean): void {
   }
 
   fs.cpSync(sourcePath, destinationPath, { recursive: true });
-  console.log("Prompts loaded → ~/.hive/prompts/");
+  renderStep("Prompts loaded -> ~/.hive/prompts/");
 }
