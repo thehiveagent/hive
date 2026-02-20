@@ -8,7 +8,7 @@ export interface SchemaMigration {
   sql: string;
 }
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 const initialSchemaSql = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS agents (
   provider TEXT NOT NULL,
   model TEXT NOT NULL,
   persona TEXT NOT NULL,
+  dob TEXT,
+  location TEXT,
+  profession TEXT,
+  about_raw TEXT,
+  agent_name TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -60,6 +65,17 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
     name: "v1_initial_schema",
     sql: initialSchemaSql,
   },
+  {
+    version: 2,
+    name: "v2_agents_profile_columns",
+    sql: `
+ALTER TABLE agents ADD COLUMN dob TEXT;
+ALTER TABLE agents ADD COLUMN location TEXT;
+ALTER TABLE agents ADD COLUMN profession TEXT;
+ALTER TABLE agents ADD COLUMN about_raw TEXT;
+ALTER TABLE agents ADD COLUMN agent_name TEXT;
+`,
+  },
 ];
 
 export interface MetaRecord {
@@ -74,6 +90,11 @@ export interface AgentRecord {
   provider: string;
   model: string;
   persona: string;
+  dob: string | null;
+  location: string | null;
+  profession: string | null;
+  about_raw: string | null;
+  agent_name: string | null;
   created_at: string;
   updated_at: string;
 }

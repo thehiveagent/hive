@@ -29,6 +29,11 @@ export interface UpsertAgentInput {
   provider: string;
   model: string;
   persona: string;
+  dob?: string | null;
+  location?: string | null;
+  profession?: string | null;
+  aboutRaw?: string | null;
+  agentName?: string | null;
 }
 
 export interface CreateConversationInput {
@@ -44,6 +49,14 @@ export interface AppendMessageInput {
 
 export const HIVE_DIRECTORY_NAME = ".hive";
 export const HIVE_DB_FILENAME = "hive.db";
+
+const AGENT_PROFILE_COLUMNS = [
+  { name: "dob", definition: "TEXT" },
+  { name: "location", definition: "TEXT" },
+  { name: "profession", definition: "TEXT" },
+  { name: "about_raw", definition: "TEXT" },
+  { name: "agent_name", definition: "TEXT" },
+] as const;
 
 export function getHiveHomeDir(): string {
   return process.env.HIVE_HOME ?? join(homedir(), HIVE_DIRECTORY_NAME);
@@ -98,7 +111,12 @@ export function runMigrations(db: HiveDatabase): void {
     }
 
     const applyMigration = db.transaction(() => {
-      db.exec(migration.sql);
+      if (migration.name === "v2_agents_profile_columns") {
+        ensureAgentProfileColumns(db);
+      } else {
+        db.exec(migration.sql);
+      }
+
       db.prepare(
         `
         INSERT INTO schema_migrations (version, name, applied_at)
@@ -108,6 +126,21 @@ export function runMigrations(db: HiveDatabase): void {
     });
 
     applyMigration();
+  }
+}
+
+function ensureAgentProfileColumns(db: HiveDatabase): void {
+  const tableInfo = db.prepare("PRAGMA table_info(agents)").all() as Array<{
+    name: string;
+  }>;
+  const existingColumns = new Set(tableInfo.map((column) => column.name));
+
+  for (const column of AGENT_PROFILE_COLUMNS) {
+    if (existingColumns.has(column.name)) {
+      continue;
+    }
+
+    db.exec(`ALTER TABLE agents ADD COLUMN ${column.name} ${column.definition}`);
   }
 }
 
@@ -147,7 +180,19 @@ export function getPrimaryAgent(db: HiveDatabase): AgentRecord | null {
   const row = db
     .prepare(
       `
-      SELECT id, name, provider, model, persona, created_at, updated_at
+      SELECT
+        id,
+        name,
+        provider,
+        model,
+        persona,
+        dob,
+        location,
+        profession,
+        about_raw,
+        agent_name,
+        created_at,
+        updated_at
       FROM agents
       ORDER BY datetime(created_at) ASC
       LIMIT 1
@@ -169,7 +214,17 @@ export function upsertPrimaryAgent(
     db.prepare(
       `
       UPDATE agents
-      SET name = ?, provider = ?, model = ?, persona = ?, updated_at = ?
+      SET
+        name = ?,
+        provider = ?,
+        model = ?,
+        persona = ?,
+        dob = ?,
+        location = ?,
+        profession = ?,
+        about_raw = ?,
+        agent_name = ?,
+        updated_at = ?
       WHERE id = ?
     `,
     ).run(
@@ -177,6 +232,11 @@ export function upsertPrimaryAgent(
       input.provider,
       input.model,
       input.persona,
+      input.dob ?? null,
+      input.location ?? null,
+      input.profession ?? null,
+      input.aboutRaw ?? null,
+      input.agentName ?? null,
       timestamp,
       existing.id,
     );
@@ -187,6 +247,11 @@ export function upsertPrimaryAgent(
       provider: input.provider,
       model: input.model,
       persona: input.persona,
+      dob: input.dob ?? null,
+      location: input.location ?? null,
+      profession: input.profession ?? null,
+      about_raw: input.aboutRaw ?? null,
+      agent_name: input.agentName ?? null,
       updated_at: timestamp,
     };
   }
@@ -194,10 +259,36 @@ export function upsertPrimaryAgent(
   const id = uuidv4();
   db.prepare(
     `
-    INSERT INTO agents (id, name, provider, model, persona, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO agents (
+      id,
+      name,
+      provider,
+      model,
+      persona,
+      dob,
+      location,
+      profession,
+      about_raw,
+      agent_name,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
-  ).run(id, input.name, input.provider, input.model, input.persona, timestamp, timestamp);
+  ).run(
+    id,
+    input.name,
+    input.provider,
+    input.model,
+    input.persona,
+    input.dob ?? null,
+    input.location ?? null,
+    input.profession ?? null,
+    input.aboutRaw ?? null,
+    input.agentName ?? null,
+    timestamp,
+    timestamp,
+  );
 
   return {
     id,
@@ -205,6 +296,11 @@ export function upsertPrimaryAgent(
     provider: input.provider,
     model: input.model,
     persona: input.persona,
+    dob: input.dob ?? null,
+    location: input.location ?? null,
+    profession: input.profession ?? null,
+    about_raw: input.aboutRaw ?? null,
+    agent_name: input.agentName ?? null,
     created_at: timestamp,
     updated_at: timestamp,
   };

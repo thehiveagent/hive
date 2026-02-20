@@ -3,6 +3,8 @@ import process from "node:process";
 import chalk from "chalk";
 import { Command } from "commander";
 import inquirer from "inquirer";
+import keytar from "keytar";
+import fetch from "node-fetch";
 import ora from "ora";
 
 import { buildDefaultPersona } from "../../agent/agent.js";
@@ -13,167 +15,328 @@ import {
   setMetaValue,
   upsertPrimaryAgent,
 } from "../../storage/db.js";
-import {
-  SUPPORTED_PROVIDER_NAMES,
-  normalizeProviderName,
-  type ProviderName,
-} from "../../providers/base.js";
-import { getDefaultModelForProvider } from "../../providers/index.js";
+import { SUPPORTED_PROVIDER_NAMES, type ProviderName } from "../../providers/base.js";
 
-interface InitCommandOptions {
-  name?: string;
-  provider?: string;
-  model?: string;
-  force?: boolean;
-}
-
-interface ResolvedInitConfig {
+interface InitAnswers {
   name: string;
+  dob: string;
+  location: string;
+  profession: string;
+  aboutRaw: string;
   provider: ProviderName;
   model: string;
+  apiKey?: string;
+  agentName?: string;
+}
+
+type HostedProviderName = Exclude<ProviderName, "ollama">;
+
+const KEYCHAIN_SERVICE = "hive";
+const OLLAMA_TAGS_URL = "http://localhost:11434/api/tags";
+
+const MODEL_CHOICES_BY_PROVIDER: Record<HostedProviderName, readonly string[]> = {
+  openai: ["gpt-4o", "gpt-4o-mini", "o1"],
+  anthropic: [
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5-20251001",
+  ],
+  groq: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+  mistral: ["mistral-large-latest", "mistral-small-latest", "codestral-latest"],
+};
+
+interface OllamaTagsResponse {
+  models?: Array<{
+    name?: string;
+    model?: string;
+  }>;
 }
 
 export function registerInitCommand(program: Command): void {
   program
     .command("init")
     .description("Birth your local Hive agent")
-    .option("-n, --name <name>", "operator name")
-    .option(
-      "-p, --provider <provider>",
-      `provider (${SUPPORTED_PROVIDER_NAMES.join(", ")})`,
-    )
-    .option("-m, --model <model>", "model name override")
-    .option("--force", "overwrite existing local agent profile", false)
-    .action(async (options: InitCommandOptions) => {
-      await runInitCommand(options);
+    .action(async () => {
+      await runInitCommand();
     });
 }
 
-export async function runInitCommand(options: InitCommandOptions): Promise<void> {
-  const spinner = ora("Initializing Hive...").start();
+export async function runInitCommand(): Promise<void> {
+  const spinner = ora("Preparing init...").start();
   const db = openHiveDatabase();
 
   try {
-    const existing = getPrimaryAgent(db);
-    if (existing && !options.force) {
-      spinner.stop();
-      console.log(chalk.yellow("Hive is already initialized."));
-      console.log(
-        chalk.dim(
-          `Agent: ${existing.name} | Provider: ${existing.provider} | Model: ${existing.model}`,
-        ),
-      );
-      console.log(chalk.dim("Use `hive init --force` to overwrite the profile."));
-      return;
+    if (!process.stdin.isTTY) {
+      throw new Error("`hive init` requires an interactive terminal.");
     }
 
-    const config = await resolveInitConfig(options, existing);
-    const persona = buildDefaultPersona(config.name);
+    const existing = getPrimaryAgent(db);
+    spinner.stop();
+
+    if (existing) {
+      const { reinitialize } = (await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "reinitialize",
+          message: "Agent already exists. Reinitialize? (y/n)",
+          default: false,
+        },
+      ])) as { reinitialize: boolean };
+
+      if (!reinitialize) {
+        console.log(chalk.dim("Initialization cancelled."));
+        return;
+      }
+    }
+
+    const answers = await askInitQuestions();
+    spinner.start("Initializing...");
+
+    if (answers.provider !== "ollama" && answers.apiKey) {
+      await keytar.setPassword(KEYCHAIN_SERVICE, answers.provider, answers.apiKey);
+    }
 
     const agent = upsertPrimaryAgent(db, {
-      name: config.name,
-      provider: config.provider,
-      model: config.model,
-      persona,
+      name: answers.name,
+      provider: answers.provider,
+      model: answers.model,
+      persona: buildDefaultPersona(answers.name),
+      dob: answers.dob,
+      location: answers.location,
+      profession: answers.profession,
+      aboutRaw: answers.aboutRaw,
+      agentName: answers.agentName ?? null,
     });
 
     setMetaValue(db, "initialized_at", new Date().toISOString());
     setMetaValue(db, "provider", agent.provider);
     setMetaValue(db, "model", agent.model);
 
-    spinner.succeed("Hive is alive.");
-    console.log(chalk.green(`Agent: ${agent.name}`));
+    spinner.succeed("Initialization complete.");
+    console.log(chalk.green(`HIVE-ID: ${agent.id}`));
+    if (agent.agent_name) {
+      console.log(chalk.green(`Agent name: ${agent.agent_name}`));
+    }
     console.log(chalk.green(`Provider: ${agent.provider}`));
     console.log(chalk.green(`Model: ${agent.model}`));
-    console.log(chalk.dim("Run `hive chat` to start talking."));
+    console.log("Run `hive chat` to start talking.");
   } catch (error) {
-    spinner.fail("Hive initialization failed.");
+    if (spinner.isSpinning) {
+      spinner.fail("Hive initialization failed.");
+    }
     throw error;
   } finally {
     closeHiveDatabase(db);
   }
 }
 
-async function resolveInitConfig(
-  options: InitCommandOptions,
-  existing: { name: string; provider: string; model: string } | null,
-): Promise<ResolvedInitConfig> {
-  const defaultName =
-    options.name?.trim() ||
-    existing?.name ||
-    process.env.HIVE_NAME ||
-    process.env.USER ||
-    "Operator";
+async function askInitQuestions(): Promise<InitAnswers> {
+  const { name } = (await inquirer.prompt([
+    {
+      type: "input",
+      name: "name",
+      message: "What's your name?",
+      validate: requiredField("Name is required."),
+    },
+  ])) as { name: string };
 
-  let provider = normalizeProviderName(
-    options.provider ?? existing?.provider ?? process.env.HIVE_PROVIDER,
-  );
+  const { dob } = (await inquirer.prompt([
+    {
+      type: "input",
+      name: "dob",
+      message: "Date of birth? (DD/MM/YYYY)",
+      validate: (value: string) =>
+        /^\d{2}\/\d{2}\/\d{4}$/.test(value.trim()) || "Use DD/MM/YYYY format.",
+    },
+  ])) as { dob: string };
 
-  let model =
-    options.model?.trim() ||
-    existing?.model ||
-    getDefaultModelForProvider(provider);
+  const { location } = (await inquirer.prompt([
+    {
+      type: "input",
+      name: "location",
+      message: "Where are you based?",
+      validate: requiredField("Location is required."),
+    },
+  ])) as { location: string };
 
-  let name = defaultName;
+  const { profession } = (await inquirer.prompt([
+    {
+      type: "input",
+      name: "profession",
+      message: "What do you do?",
+      validate: requiredField("Profession is required."),
+    },
+  ])) as { profession: string };
 
-  if (process.stdin.isTTY) {
-    const questions: Array<Record<string, unknown>> = [];
+  const { aboutRaw } = (await inquirer.prompt([
+    {
+      type: "input",
+      name: "aboutRaw",
+      message:
+        "Tell me about yourself. Who you are, what you're building, what matters to you. No rules.",
+      validate: requiredField("About is required."),
+    },
+  ])) as { aboutRaw: string };
 
-    if (!options.name) {
-      questions.push({
-        type: "input",
-        name: "name",
-        message: "Who owns this Hive node?",
-        default: defaultName,
-      });
-    }
+  const { provider } = (await inquirer.prompt([
+    {
+      type: "list",
+      name: "provider",
+      message: "Choose a provider",
+      choices: SUPPORTED_PROVIDER_NAMES.map((value) => ({
+        name: value,
+        value,
+      })),
+    },
+  ])) as { provider: ProviderName };
 
-    if (!options.provider && !existing?.provider && !process.env.HIVE_PROVIDER) {
-      questions.push({
-        type: "list",
-        name: "provider",
-        message: "Choose your default provider",
-        choices: SUPPORTED_PROVIDER_NAMES.map((value) => ({
-          name: value,
-          value,
-        })),
-        default: provider,
-      });
-    }
+  const model = await promptForModel(provider);
 
-    if (!options.model) {
-      questions.push({
-        type: "input",
-        name: "model",
-        message: "Default model",
-        default: model,
-      });
-    }
+  let apiKey: string | undefined;
+  if (provider !== "ollama") {
+    const answer = (await inquirer.prompt([
+      {
+        type: "password",
+        name: "apiKey",
+        message: "Enter your API key:",
+        mask: "*",
+        validate: requiredField("API key is required."),
+      },
+    ])) as { apiKey: string };
 
-    if (questions.length > 0) {
-      const answers = (await inquirer.prompt(questions)) as {
-        name?: string;
-        provider?: string;
-        model?: string;
-      };
-
-      if (answers.name) {
-        name = answers.name.trim();
-      }
-
-      if (answers.provider) {
-        provider = normalizeProviderName(answers.provider);
-      }
-
-      if (answers.model) {
-        model = answers.model.trim();
-      }
-    }
+    apiKey = answer.apiKey.trim();
   }
 
+  const { agentName } = (await inquirer.prompt([
+    {
+      type: "input",
+      name: "agentName",
+      message: "What do you want to call your agent? (optional)",
+    },
+  ])) as { agentName: string };
+
   return {
-    name,
+    name: name.trim(),
+    dob: dob.trim(),
+    location: location.trim(),
+    profession: profession.trim(),
+    aboutRaw,
     provider,
     model,
+    apiKey,
+    agentName: normalizeOptional(agentName),
   };
+}
+
+async function promptForModel(provider: ProviderName): Promise<string> {
+  if (provider === "ollama") {
+    const ollamaModels = await fetchOllamaModels();
+
+    if (ollamaModels && ollamaModels.length > 0) {
+      const answer = (await inquirer.prompt([
+        {
+          type: "checkbox",
+          name: "model",
+          message: "Choose a model",
+          choices: ollamaModels.map((value) => ({
+            name: value,
+            value,
+          })),
+          validate: (values: string[]) =>
+            values.length === 1 || "Select exactly one model.",
+        },
+      ])) as { model: string[] };
+
+      return answer.model[0];
+    }
+
+    const fallbackMessage =
+      ollamaModels === null
+        ? "Ollama not detected. Enter model name manually:"
+        : "No local Ollama models found. Enter model name manually:";
+
+    const answer = (await inquirer.prompt([
+      {
+        type: "input",
+        name: "model",
+        message: fallbackMessage,
+        validate: requiredField("Model is required."),
+      },
+    ])) as { model: string };
+
+    return answer.model.trim();
+  }
+
+  const answer = (await inquirer.prompt([
+    {
+      type: "list",
+      name: "model",
+      message: "Choose a model",
+      choices: MODEL_CHOICES_BY_PROVIDER[provider].map((value) => ({
+        name: value,
+        value,
+      })),
+    },
+  ])) as { model: string };
+
+  return answer.model;
+}
+
+async function fetchOllamaModels(): Promise<string[] | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 1000);
+
+  try {
+    const response = await fetch(OLLAMA_TAGS_URL, {
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as OllamaTagsResponse;
+    if (!Array.isArray(payload.models)) {
+      return [];
+    }
+
+    return Array.from(
+      new Set(
+        payload.models
+          .map((entry) => {
+            if (typeof entry.name === "string" && entry.name.trim().length > 0) {
+              return entry.name.trim();
+            }
+
+            if (typeof entry.model === "string" && entry.model.trim().length > 0) {
+              return entry.model.trim();
+            }
+
+            return "";
+          })
+          .filter((value) => value.length > 0),
+      ),
+    );
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function requiredField(message: string): (value: string) => true | string {
+  return (value: string) => {
+    if (value.trim().length > 0) {
+      return true;
+    }
+
+    return message;
+  };
+}
+
+function normalizeOptional(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
