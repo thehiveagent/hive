@@ -1,0 +1,51 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ES2022",
+        "moduleResolution": "bundler",
+        "lib": [
+            "ES2022"
+        ],
+        "outDir": "./dist",
+        "rootDir": "./src",
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "resolveJsonModule": true,
+        "declaration": true,
+        "declarationMap": true,
+        "sourceMap": true,
+        "experimentalDecorators": true,
+        "emitDecoratorMetadata": true,
+        "allowSyntheticDefaultImports": true,
+        "paths": {
+            "@agent/*": [
+                "./src/agent/*"
+            ],
+            "@providers/*": [
+                "./src/providers/*"
+            ],
+            "@storage/*": [
+                "./src/storage/*"
+            ],
+            "@utils/*": [
+                "./src/utils/*"
+            ],
+            "@integrations/*": [
+                "./src/integrations/*"
+            ],
+            "@mesh/*": [
+                "./src/mesh/*"
+            ]
+        }
+    },
+    "include": [
+        "src/**/*"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist",
+        "**/*.test.ts"
+    ]
+}
