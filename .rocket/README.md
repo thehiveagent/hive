@@ -1,8 +1,8 @@
 # GENIE Workspace Overview
 
 Workspace directory: `/Volumes/Misbah/Development/hive/.rocket`
-Indexed 23 files, 14 symbols, and 0 dependency edges.
-Last index run: 306 ms (18 changed, 0 deleted).
+Indexed 23 files, 278 symbols, and 0 dependency edges.
+Last index run: 36 ms (1 changed, 0 deleted).
 Primary languages: typescript (21), json (2).
 Detected approximately 0 UI component files (.tsx/.jsx).
 Detected 0 API route-like files (path includes /api/).

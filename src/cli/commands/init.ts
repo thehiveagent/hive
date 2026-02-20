@@ -1,4 +1,6 @@
 import process from "node:process";
+import * as fs from "node:fs";
+import { join } from "node:path";
 
 import chalk from "chalk";
 import { Command } from "commander";
@@ -10,6 +12,7 @@ import { buildDefaultPersona } from "../../agent/agent.js";
 import { promptForModel, promptForProvider } from "../helpers/providerPrompts.js";
 import {
   closeHiveDatabase,
+  getHiveHomeDir,
   getPrimaryAgent,
   openHiveDatabase,
   setMetaValue,
@@ -29,18 +32,23 @@ interface InitAnswers {
   agentName?: string;
 }
 
+interface InitCommandOptions {
+  force?: boolean;
+}
+
 const KEYCHAIN_SERVICE = "hive";
 
 export function registerInitCommand(program: Command): void {
   program
     .command("init")
     .description("Birth your local Hive agent")
-    .action(async () => {
-      await runInitCommand();
+    .option("--force", "overwrite ~/.hive/prompts when loading prompts")
+    .action(async (options: InitCommandOptions) => {
+      await runInitCommand(options);
     });
 }
 
-export async function runInitCommand(): Promise<void> {
+export async function runInitCommand(options: InitCommandOptions = {}): Promise<void> {
   const spinner = ora("Preparing init...").start();
   const db = openHiveDatabase();
 
@@ -90,6 +98,7 @@ export async function runInitCommand(): Promise<void> {
     setMetaValue(db, "initialized_at", new Date().toISOString());
     setMetaValue(db, "provider", agent.provider);
     setMetaValue(db, "model", agent.model);
+    copyPromptsDirectory(options.force ?? false);
 
     spinner.succeed("Initialization complete.");
     console.log(chalk.green(`HIVE-ID: ${agent.id}`));
@@ -209,4 +218,25 @@ function requiredField(message: string): (value: string) => true | string {
 function normalizeOptional(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function copyPromptsDirectory(force: boolean): void {
+  const sourcePath = join(process.cwd(), "prompts");
+  const destinationPath = join(getHiveHomeDir(), "prompts");
+
+  if (!fs.existsSync(sourcePath)) {
+    console.warn(chalk.yellow("Warning: prompts/ folder not found. Skipping prompts load."));
+    return;
+  }
+
+  if (fs.existsSync(destinationPath)) {
+    if (!force) {
+      return;
+    }
+
+    fs.rmSync(destinationPath, { recursive: true, force: true });
+  }
+
+  fs.cpSync(sourcePath, destinationPath, { recursive: true });
+  console.log("Prompts loaded → ~/.hive/prompts/");
 }
