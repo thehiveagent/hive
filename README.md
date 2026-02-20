@@ -1,3 +1,5 @@
+[![npm version](https://img.shields.io/npm/v/@imisbahk/hive)](https://www.npmjs.com/package/@imisbahk/hive)
+
 # 🐝 The Hive
 
 > Your agent. Always running. Always learning. Always working.
