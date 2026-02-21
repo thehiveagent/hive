@@ -75,3 +75,27 @@ npm install -g @imisbahk/hive@0.1.1
 ```bash
 npm install -g @imisbahk/hive@0.1.2
 ```
+
+## 🐝 v0.2.0 — Doctor (Health Checks)
+
+### What's in v0.2.0
+
+- New `hive doctor` command runs a full diagnostic pass across local Hive setup.
+- Live, sequential output (no spinner) so checks feel immediate as they complete.
+- Checks include:
+  - Agent initialized (DB record exists)
+  - Database readable + integrity check + size warning when large
+  - API key present in OS keychain
+  - Provider reachability (5s timeout)
+  - Prompts folder present with files
+  - Theme selection from local DB metadata
+  - Node version warning if < v20
+  - Playwright + Chromium installed
+  - Ollama running when provider is `ollama`
+  - Basic DB stats (messages, conversations, episodes when table exists)
+
+### Upgrade
+
+```bash
+npm install -g @imisbahk/hive@0.2.0
+```

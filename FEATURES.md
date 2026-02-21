@@ -1,4 +1,4 @@
-• v0.1.2 command surface:
+• v0.1.3 command surface:
 
   CLI commands
 
@@ -11,6 +11,7 @@
   - hive config key → interactive API key update
   - hive config theme → interactive accent theme picker (live preview)
   - hive config show → show provider/model/agent/key status
+  - hive doctor → run full health check diagnostics
   - hive status → full local status report
   - hive nuke → permanently delete local Hive data + keys
   - hive help [command]
