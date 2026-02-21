@@ -9,7 +9,7 @@ import { registerConfigCommand } from "./commands/config.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerNukeCommand } from "./commands/nuke.js";
 import { registerStatusCommand } from "./commands/status.js";
-import { renderError } from "./ui.js";
+import { renderError, renderHiveHeader } from "./ui.js";
 
 const program = new Command();
 
@@ -24,6 +24,18 @@ registerConfigCommand(program);
 registerStatusCommand(program);
 registerNukeCommand(program);
 
+const argv = process.argv.slice(2);
+
+if (argv.length === 0) {
+  renderHiveHeader("Home");
+  program.outputHelp();
+  process.exit(0);
+}
+
+if (shouldRenderHelpHeader(argv)) {
+  renderHiveHeader(resolveHelpTitle(argv));
+}
+
 program
   .parseAsync(process.argv)
   .catch((error: unknown) => {
@@ -36,3 +48,16 @@ program
     renderError(String(error));
     process.exitCode = 1;
   });
+
+function shouldRenderHelpHeader(args: string[]): boolean {
+  return args[0] === "help" || args.includes("-h") || args.includes("--help");
+}
+
+function resolveHelpTitle(args: string[]): string {
+  if (args[0] === "help") {
+    return args[1] ?? "Help";
+  }
+
+  const commandName = args.find((arg) => !arg.startsWith("-"));
+  return commandName ?? "Help";
+}
