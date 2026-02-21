@@ -101,8 +101,9 @@ npm link           # use `hive` command globally
 
 ## CLI Commands
 
+- `hive` — default entrypoint; starts an interactive chat session with your primary agent.
 - `hive init` — initialize local Hive state (`~/.hive`), create the primary agent profile, and store provider config.
-- `hive chat` — start an interactive chat session with your primary agent.
+- `hive chat` — deprecated alias for `hive`.
 - `hive config` — update provider/model/API key settings after initialization.
 - `hive status` — print current Hive status (agent, owner, provider/model, API key set/not set, database path + size, prompts file count, initialized date).
 - `hive nuke` — permanently delete `~/.hive` and remove stored `hive` keychain entries after typing `nuke` to confirm.

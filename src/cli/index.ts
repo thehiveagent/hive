@@ -4,7 +4,7 @@ import "dotenv/config";
 
 import { Command } from "commander";
 
-import { registerChatCommand } from "./commands/chat.js";
+import { registerChatCommand, runChatCommand } from "./commands/chat.js";
 import { registerConfigCommand } from "./commands/config.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerNukeCommand } from "./commands/nuke.js";
@@ -16,7 +16,7 @@ const program = new Command();
 program
   .name("hive")
   .description("Your agent. Always running. Always learning. Always working.")
-  .version("0.1.0");
+  .version("0.1.1");
 
 registerInitCommand(program);
 registerChatCommand(program);
@@ -26,19 +26,21 @@ registerNukeCommand(program);
 
 const argv = process.argv.slice(2);
 
-if (argv.length === 0) {
-  renderHiveHeader("Home");
-  program.outputHelp();
-  process.exit(0);
-}
+void main();
 
-if (shouldRenderHelpHeader(argv)) {
-  renderHiveHeader(resolveHelpTitle(argv));
-}
+async function main(): Promise<void> {
+  try {
+    if (argv.length === 0) {
+      await runChatCommand({}, { entrypoint: "default" });
+      return;
+    }
 
-program
-  .parseAsync(process.argv)
-  .catch((error: unknown) => {
+    if (shouldRenderHelpHeader(argv)) {
+      renderHiveHeader(resolveHelpTitle(argv));
+    }
+
+    await program.parseAsync(process.argv);
+  } catch (error) {
     if (error instanceof Error) {
       renderError(error.message);
       process.exitCode = 1;
@@ -47,7 +49,8 @@ program
 
     renderError(String(error));
     process.exitCode = 1;
-  });
+  }
+}
 
 function shouldRenderHelpHeader(args: string[]): boolean {
   return args[0] === "help" || args.includes("-h") || args.includes("--help");

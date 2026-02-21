@@ -49,10 +49,11 @@ npm link
 
 ```bash
 hive init      # birth your agent
-hive chat      # talk to it
-hive code      # enter coding mode
+hive           # talk to it (default interactive chat)
 hive status    # see what's running
 ```
+
+`hive chat` still works as a deprecated alias.
 
 ---
 
@@ -60,16 +61,15 @@ hive status    # see what's running
 
 | Command | Description |
 |---|---|
+| `hive` | Open interactive chat with your agent (default entrypoint) |
 | `hive init` | Create your agent. Runs once. Ever. |
-| `hive chat` | Talk to your agent |
-| `hive code` | Enter coding mode with Genie intelligence |
-| `hive task` | Manage running tasks |
-| `hive memory` | Inspect and manage agent memory |
-| `hive integrations` | Manage connected services |
-| `hive agents` | Manage sub-agents |
+| `hive chat` | Deprecated alias for `hive` |
+| `hive config` | Update provider/model/API keys |
 | `hive status` | Health of your local node |
-| `hive ui` | Open local web dashboard |
 | `hive nuke` | Full wipe. Gone. |
+
+Inside chat, type `/` to see command suggestions (chat + Hive shortcuts).  
+Supported in-chat Hive shortcuts include `/hive status`, `/hive config show`, `/hive config provider`, `/hive config model`, `/hive config key`.
 
 ---
 

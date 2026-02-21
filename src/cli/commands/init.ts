@@ -113,7 +113,7 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
     }
     renderSuccess(`Provider: ${agent.provider}`);
     renderSuccess(`Model: ${agent.model}`);
-    renderStep("Run `hive chat` to start talking.");
+    renderStep("Run `hive` to start talking.");
   } catch (error) {
     if (spinner.isSpinning) {
       spinner.fail("Hive initialization failed.");

@@ -18,8 +18,13 @@ import {
   renderInfo,
   renderSeparator,
 } from "../ui.js";
-import { runConfigShowCommand } from "./config.js";
-import { runStatusCommand } from "./status.js";
+import {
+  runConfigKeyCommandWithOptions,
+  runConfigModelCommandWithOptions,
+  runConfigProviderCommandWithOptions,
+  runConfigShowCommandWithOptions,
+} from "./config.js";
+import { runStatusCommandWithOptions } from "./status.js";
 
 interface ChatCommandOptions {
   message?: string;
@@ -36,11 +41,17 @@ interface RunChatOptions {
   temperature?: number;
 }
 
+interface RunChatCommandContext {
+  entrypoint?: "default" | "chat-command";
+}
+
 interface CommandSuggestion {
   label: string;
   insertText: string;
   description: string;
 }
+
+type HiveShortcutResult = "not-handled" | "handled" | "config-updated";
 
 const USER_PROMPT = "you› ";
 const HIVE_SHORTCUT_PREFIX = "/hive";
@@ -57,6 +68,9 @@ const COMMAND_HELP_TEXT = [
   "  /hive help      show Hive command shortcuts",
   "  /hive status    run `hive status`",
   "  /hive config show run `hive config show`",
+  "  /hive config provider interactive provider setup",
+  "  /hive config model interactive model setup",
+  "  /hive config key interactive key setup",
   "  /exit           quit",
 ].join("\n");
 const HIVE_SHORTCUT_HELP_TEXT = [
@@ -65,11 +79,13 @@ const HIVE_SHORTCUT_HELP_TEXT = [
   "  /hive status       run hive status",
   "  /hive config show  run hive config show",
   "",
-  "Interactive commands are not run inside chat:",
-  "  /hive init",
+  "Interactive config commands (in chat):",
   "  /hive config provider",
   "  /hive config model",
   "  /hive config key",
+  "",
+  "Safety commands still run from shell:",
+  "  /hive init",
   "  /hive nuke",
 ].join("\n");
 const CHAT_HINT_TEXT = "? for help | /exit to quit";
@@ -127,17 +143,17 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
   {
     label: "/hive config provider",
     insertText: "/hive config provider",
-    description: "run hive config provider (outside chat)",
+    description: "interactive provider setup",
   },
   {
     label: "/hive config model",
     insertText: "/hive config model",
-    description: "run hive config model (outside chat)",
+    description: "interactive model setup",
   },
   {
     label: "/hive config key",
     insertText: "/hive config key",
-    description: "run hive config key (outside chat)",
+    description: "interactive key setup",
   },
   {
     label: "/hive nuke",
@@ -149,7 +165,7 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
 export function registerChatCommand(program: Command): void {
   program
     .command("chat")
-    .description("Talk to your Hive agent")
+    .description("(Deprecated) Talk to your Hive agent. Use `hive`.")
     .option("-m, --message <text>", "send a single message and exit")
     .option("-c, --conversation <id>", "continue an existing conversation")
     .option("--model <model>", "override model for this session")
@@ -157,13 +173,21 @@ export function registerChatCommand(program: Command): void {
     .option("-t, --temperature <value>", "sampling temperature")
     .option("--preview", "run chat UI preview without Hive initialization")
     .action(async (options: ChatCommandOptions) => {
-      await runChatCommand(options);
+      await runChatCommand(options, { entrypoint: "chat-command" });
     });
 }
 
-export async function runChatCommand(options: ChatCommandOptions): Promise<void> {
+export async function runChatCommand(
+  options: ChatCommandOptions,
+  context: RunChatCommandContext = {},
+): Promise<void> {
   console.clear();
   renderHiveHeader("Chat");
+
+  const entrypoint = context.entrypoint ?? "chat-command";
+  if (entrypoint === "chat-command") {
+    renderInfo("`hive chat` is deprecated. Run `hive`.");
+  }
 
   if (options.preview) {
     await runPreviewSession(options);
@@ -180,10 +204,11 @@ export async function runChatCommand(options: ChatCommandOptions): Promise<void>
       return;
     }
 
-    const provider = await createProvider(profile.provider);
-    const agent = new HiveAgent(db, provider, profile);
-    const agentName = resolveAgentName(profile.agent_name);
-    const model = options.model ?? profile.model;
+    let activeProfile = profile;
+    let provider = await createProvider(activeProfile.provider);
+    let agent = new HiveAgent(db, provider, activeProfile);
+    let agentName = resolveAgentName(activeProfile.agent_name);
+    const model = options.model ?? activeProfile.model;
 
     let conversationId = options.conversation;
     const runOptions: RunChatOptions = {
@@ -234,14 +259,39 @@ export async function runChatCommand(options: ChatCommandOptions): Promise<void>
         break;
       }
 
-      if (prompt === "/new") {
-        conversationId = undefined;
-        renderInfo("Started a new conversation context.");
-        continue;
-      }
+        if (prompt === "/new") {
+          conversationId = undefined;
+          renderInfo("Started a new conversation context.");
+          continue;
+        }
 
-      try {
-        if (await handleHiveShortcut(prompt)) {
+        try {
+        const shortcutResult = await handleHiveShortcut(prompt, {
+          allowInteractiveConfig: true,
+        });
+        if (shortcutResult === "handled") {
+          continue;
+        }
+        if (shortcutResult === "config-updated") {
+          const latestProfile = getPrimaryAgent(db);
+          if (!latestProfile) {
+            renderError("Hive is not initialized. Run `hive init` first.");
+            continue;
+          }
+
+          activeProfile = latestProfile;
+          provider = await createProvider(activeProfile.provider);
+          agent = new HiveAgent(db, provider, activeProfile);
+          agentName = resolveAgentName(activeProfile.agent_name);
+          if (!options.model) {
+            runOptions.model = activeProfile.model;
+          }
+
+          conversationId = undefined;
+          renderInfo(
+            `Switched to ${activeProfile.provider} · ${runOptions.model ?? activeProfile.model}.`,
+          );
+          renderInfo("Started a new conversation context.");
           continue;
         }
 
@@ -442,17 +492,22 @@ function isUnknownSlashCommand(prompt: string): boolean {
   return true;
 }
 
-async function handleHiveShortcut(prompt: string): Promise<boolean> {
+async function handleHiveShortcut(
+  prompt: string,
+  options: {
+    allowInteractiveConfig?: boolean;
+  } = {},
+): Promise<HiveShortcutResult> {
   const normalized = prompt.trim().replace(/\s+/g, " ");
   const lower = normalized.toLowerCase();
 
   if (lower === HIVE_SHORTCUT_PREFIX) {
     renderInfo(HIVE_SHORTCUT_HELP_TEXT);
-    return true;
+    return "handled";
   }
 
   if (!lower.startsWith(`${HIVE_SHORTCUT_PREFIX} `)) {
-    return false;
+    return "not-handled";
   }
 
   const rawSubcommand = normalized.slice(HIVE_SHORTCUT_PREFIX.length).trim();
@@ -460,33 +515,65 @@ async function handleHiveShortcut(prompt: string): Promise<boolean> {
 
   if (subcommand.length === 0 || subcommand === "help") {
     renderInfo(HIVE_SHORTCUT_HELP_TEXT);
-    return true;
+    return "handled";
   }
 
   if (subcommand === "status") {
-    await runStatusCommand();
-    return true;
+    await runStatusCommandWithOptions({ showHeader: false });
+    restoreChatInputAfterInteractiveCommand();
+    return "handled";
   }
 
   if (subcommand === "config show") {
-    await runConfigShowCommand();
-    return true;
+    await runConfigShowCommandWithOptions({ showHeader: false });
+    restoreChatInputAfterInteractiveCommand();
+    return "handled";
+  }
+
+  if (subcommand === "config provider") {
+    if (!options.allowInteractiveConfig) {
+      renderInfo("Interactive config commands are unavailable here.");
+      return "handled";
+    }
+
+    await runConfigProviderCommandWithOptions({ showHeader: false });
+    restoreChatInputAfterInteractiveCommand();
+    return "config-updated";
+  }
+
+  if (subcommand === "config model") {
+    if (!options.allowInteractiveConfig) {
+      renderInfo("Interactive config commands are unavailable here.");
+      return "handled";
+    }
+
+    await runConfigModelCommandWithOptions({ showHeader: false });
+    restoreChatInputAfterInteractiveCommand();
+    return "config-updated";
+  }
+
+  if (subcommand === "config key") {
+    if (!options.allowInteractiveConfig) {
+      renderInfo("Interactive config commands are unavailable here.");
+      return "handled";
+    }
+
+    await runConfigKeyCommandWithOptions({ showHeader: false });
+    restoreChatInputAfterInteractiveCommand();
+    return "handled";
   }
 
   if (
     subcommand === "init" ||
-    subcommand === "nuke" ||
-    subcommand === "config provider" ||
-    subcommand === "config model" ||
-    subcommand === "config key"
+    subcommand === "nuke"
   ) {
     renderInfo(`Run \`hive ${rawSubcommand}\` from your shell. This command is interactive.`);
-    return true;
+    return "handled";
   }
 
   renderError(`Unknown Hive shortcut: /hive ${rawSubcommand}`);
   renderInfo("Use `/hive help` to list available shortcuts.");
-  return true;
+  return "handled";
 }
 
 function getCommandSuggestions(input: string): CommandSuggestion[] {
@@ -507,7 +594,7 @@ function getCommandSuggestions(input: string): CommandSuggestion[] {
       suggestion.label.toLowerCase().includes(normalized.slice(1)),
   );
 
-  return [...prefixMatches, ...fallbackMatches].slice(0, MAX_COMMAND_SUGGESTIONS);
+  return [...prefixMatches, ...fallbackMatches];
 }
 
 async function readPromptWithSuggestions(): Promise<string> {
@@ -526,6 +613,7 @@ async function readPromptWithSuggestions(): Promise<string> {
   }
 
   return new Promise<string>((resolve) => {
+    stdin.resume();
     readline.emitKeypressEvents(stdin);
 
     const wasRaw = stdin.isRaw ?? false;
@@ -535,6 +623,7 @@ async function readPromptWithSuggestions(): Promise<string> {
 
     let buffer = "";
     let selectedSuggestionIndex = 0;
+    let suggestionWindowStart = 0;
     let renderedSuggestionRows = 0;
 
     const cleanup = () => {
@@ -589,27 +678,47 @@ async function readPromptWithSuggestions(): Promise<string> {
       if (selectedSuggestionIndex >= suggestions.length) {
         selectedSuggestionIndex = Math.max(0, suggestions.length - 1);
       }
+      if (suggestions.length === 0) {
+        suggestionWindowStart = 0;
+      }
+
+      const visibleSuggestionCount = Math.min(MAX_COMMAND_SUGGESTIONS, suggestions.length);
+      if (selectedSuggestionIndex < suggestionWindowStart) {
+        suggestionWindowStart = selectedSuggestionIndex;
+      }
+      if (
+        visibleSuggestionCount > 0 &&
+        selectedSuggestionIndex >= suggestionWindowStart + visibleSuggestionCount
+      ) {
+        suggestionWindowStart = selectedSuggestionIndex - visibleSuggestionCount + 1;
+      }
+
+      const visibleSuggestions = suggestions.slice(
+        suggestionWindowStart,
+        suggestionWindowStart + visibleSuggestionCount,
+      );
 
       readline.cursorTo(stdout, 0);
       readline.clearLine(stdout, 0);
       stdout.write(chalk.whiteBright(`${USER_PROMPT}${buffer}`));
 
-      const rowsToRender = Math.max(renderedSuggestionRows, suggestions.length);
+      const rowsToRender = Math.max(renderedSuggestionRows, visibleSuggestions.length);
       for (let index = 0; index < rowsToRender; index += 1) {
         readline.moveCursor(stdout, 0, 1);
         readline.cursorTo(stdout, 0);
         readline.clearLine(stdout, 0);
 
-        if (index >= suggestions.length) {
+        if (index >= visibleSuggestions.length) {
           continue;
         }
 
-        const suggestion = suggestions[index];
-        const marker = index === selectedSuggestionIndex ? ">" : " ";
+        const suggestion = visibleSuggestions[index];
+        const absoluteIndex = suggestionWindowStart + index;
+        const marker = absoluteIndex === selectedSuggestionIndex ? ">" : " ";
         const label = suggestion.label.padEnd(COMMAND_LABEL_WIDTH, " ");
         const text = `${marker} ${label} ${suggestion.description}`;
 
-        if (index === selectedSuggestionIndex) {
+        if (absoluteIndex === selectedSuggestionIndex) {
           stdout.write(chalk.whiteBright(text));
         } else {
           stdout.write(chalk.dim(text));
@@ -621,7 +730,7 @@ async function readPromptWithSuggestions(): Promise<string> {
       }
 
       readline.cursorTo(stdout, USER_PROMPT.length + buffer.length);
-      renderedSuggestionRows = suggestions.length;
+      renderedSuggestionRows = visibleSuggestions.length;
     };
 
     const onKeypress = (str: string, key: readline.Key) => {
@@ -645,6 +754,7 @@ async function readPromptWithSuggestions(): Promise<string> {
         ) {
           buffer = selected.insertText;
           selectedSuggestionIndex = 0;
+          suggestionWindowStart = 0;
 
           // Commands that expect extra input should stay in edit mode.
           if (buffer.endsWith(" ")) {
@@ -662,6 +772,7 @@ async function readPromptWithSuggestions(): Promise<string> {
         chars.pop();
         buffer = chars.join("");
         selectedSuggestionIndex = 0;
+        suggestionWindowStart = 0;
         render();
         return;
       }
@@ -696,6 +807,7 @@ async function readPromptWithSuggestions(): Promise<string> {
 
         buffer = suggestions[selectedSuggestionIndex]?.insertText ?? buffer;
         selectedSuggestionIndex = 0;
+        suggestionWindowStart = 0;
         render();
         return;
       }
@@ -703,6 +815,7 @@ async function readPromptWithSuggestions(): Promise<string> {
       if (typeof str === "string" && str.length > 0 && !key.ctrl && !key.meta) {
         buffer += str;
         selectedSuggestionIndex = 0;
+        suggestionWindowStart = 0;
         render();
       }
     };
@@ -710,4 +823,18 @@ async function readPromptWithSuggestions(): Promise<string> {
     stdin.on("keypress", onKeypress);
     render();
   });
+}
+
+function restoreChatInputAfterInteractiveCommand(): void {
+  if (!stdin.isTTY) {
+    return;
+  }
+
+  try {
+    stdin.setRawMode(false);
+  } catch {
+    // Ignore terminal mode recovery errors.
+  }
+
+  stdin.resume();
 }

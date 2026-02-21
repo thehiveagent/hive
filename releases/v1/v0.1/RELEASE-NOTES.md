@@ -24,3 +24,29 @@ hive init
 ### What's next
 
 v0.2 — the agent works while you sleep. Background daemon, task queue, scheduled jobs, web browsing.
+
+---
+
+## 🐝 v0.1.1 — Chat-First CLI + Command Centre Upgrades
+
+### What's in v0.1.1
+
+- `hive` now opens interactive chat by default.
+- `hive chat` is now deprecated (still supported as an alias).
+- In-chat command suggestions: type `/` to see matching commands while typing.
+- In-chat Hive shortcuts:
+  - `/hive status`
+  - `/hive config show`
+  - `/hive config provider`
+  - `/hive config model`
+  - `/hive config key`
+- Embedded config flows in chat now keep session continuity and recover terminal input state.
+- Chat input hardening:
+  - bare `/` resolves locally instead of falling through to model messages
+  - unknown slash commands are handled locally with clear errors
+
+### Upgrade
+
+```bash
+npm install -g @imisbahk/hive@0.1.1
+```

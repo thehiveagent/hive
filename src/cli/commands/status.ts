@@ -24,6 +24,10 @@ import {
 const KEYCHAIN_SERVICE = "hive";
 const PROMPTS_DIRECTORY = "prompts";
 
+interface StatusCommandRenderOptions {
+  showHeader?: boolean;
+}
+
 export function registerStatusCommand(program: Command): void {
   program
     .command("status")
@@ -34,7 +38,17 @@ export function registerStatusCommand(program: Command): void {
 }
 
 export async function runStatusCommand(): Promise<void> {
-  renderHiveHeader("Status");
+  await runStatusCommandWithOptions();
+}
+
+export async function runStatusCommandWithOptions(
+  options: StatusCommandRenderOptions = {},
+): Promise<void> {
+  const showHeader = options.showHeader ?? true;
+  if (showHeader) {
+    renderHiveHeader("Status");
+  }
+
   const db = openHiveDatabase();
 
   try {
@@ -52,7 +66,9 @@ export async function runStatusCommand(): Promise<void> {
     const promptFiles = countFiles(promptsPath);
     const initializedRaw = getMetaValue(db, "initialized_at") ?? agent.created_at;
 
-    renderStep("Status");
+    if (showHeader) {
+      renderStep("Status");
+    }
     renderSeparator();
     printStatusLine("Agent", agent.agent_name ?? "not set");
     printStatusLine("Owner", agent.name);

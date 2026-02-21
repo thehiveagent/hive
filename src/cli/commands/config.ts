@@ -26,6 +26,14 @@ import {
 
 const KEYCHAIN_SERVICE = "hive";
 
+interface ConfigShowRenderOptions {
+  showHeader?: boolean;
+}
+
+interface ConfigInteractiveRenderOptions {
+  showHeader?: boolean;
+}
+
 export function registerConfigCommand(program: Command): void {
   const configCommand = program
     .command("config")
@@ -66,7 +74,16 @@ export function registerConfigCommand(program: Command): void {
 }
 
 export async function runConfigProviderCommand(): Promise<void> {
-  renderHiveHeader("Config · Provider");
+  await runConfigProviderCommandWithOptions();
+}
+
+export async function runConfigProviderCommandWithOptions(
+  options: ConfigInteractiveRenderOptions = {},
+): Promise<void> {
+  const showHeader = options.showHeader ?? true;
+  if (showHeader) {
+    renderHiveHeader("Config · Provider");
+  }
   const spinner = ora("Loading configuration...").start();
   const db = openHiveDatabase();
 
@@ -123,7 +140,7 @@ export async function runConfigProviderCommand(): Promise<void> {
 
     spinner.succeed("Configuration saved.");
     renderSuccess("Provider updated.");
-    renderStep("Run `hive chat` to use it.");
+    renderStep("Run `hive` to use it.");
   } catch (error) {
     if (spinner.isSpinning) {
       spinner.fail("Failed to update provider configuration.");
@@ -135,7 +152,16 @@ export async function runConfigProviderCommand(): Promise<void> {
 }
 
 export async function runConfigModelCommand(): Promise<void> {
-  renderHiveHeader("Config · Model");
+  await runConfigModelCommandWithOptions();
+}
+
+export async function runConfigModelCommandWithOptions(
+  options: ConfigInteractiveRenderOptions = {},
+): Promise<void> {
+  const showHeader = options.showHeader ?? true;
+  if (showHeader) {
+    renderHiveHeader("Config · Model");
+  }
   const spinner = ora("Loading configuration...").start();
   const db = openHiveDatabase();
 
@@ -166,7 +192,7 @@ export async function runConfigModelCommand(): Promise<void> {
 
     spinner.succeed("Configuration saved.");
     renderSuccess("Model updated.");
-    renderStep("Run `hive chat` to use it.");
+    renderStep("Run `hive` to use it.");
   } catch (error) {
     if (spinner.isSpinning) {
       spinner.fail("Failed to update model configuration.");
@@ -178,7 +204,16 @@ export async function runConfigModelCommand(): Promise<void> {
 }
 
 export async function runConfigKeyCommand(): Promise<void> {
-  renderHiveHeader("Config · Key");
+  await runConfigKeyCommandWithOptions();
+}
+
+export async function runConfigKeyCommandWithOptions(
+  options: ConfigInteractiveRenderOptions = {},
+): Promise<void> {
+  const showHeader = options.showHeader ?? true;
+  if (showHeader) {
+    renderHiveHeader("Config · Key");
+  }
   const spinner = ora("Loading configuration...").start();
   const db = openHiveDatabase();
 
@@ -212,7 +247,7 @@ export async function runConfigKeyCommand(): Promise<void> {
 
     spinner.succeed("Configuration saved.");
     renderSuccess("API key updated.");
-    renderStep("Run `hive chat` to use it.");
+    renderStep("Run `hive` to use it.");
   } catch (error) {
     if (spinner.isSpinning) {
       spinner.fail("Failed to update API key.");
@@ -224,7 +259,17 @@ export async function runConfigKeyCommand(): Promise<void> {
 }
 
 export async function runConfigShowCommand(): Promise<void> {
-  renderHiveHeader("Config · Show");
+  await runConfigShowCommandWithOptions();
+}
+
+export async function runConfigShowCommandWithOptions(
+  options: ConfigShowRenderOptions = {},
+): Promise<void> {
+  const showHeader = options.showHeader ?? true;
+  if (showHeader) {
+    renderHiveHeader("Config · Show");
+  }
+
   const db = openHiveDatabase();
 
   try {
