@@ -235,14 +235,54 @@ function copyPromptsDirectory(force: boolean): void {
     return;
   }
 
-  if (fs.existsSync(destinationPath)) {
-    if (!force) {
-      return;
-    }
-
+  if (force && fs.existsSync(destinationPath)) {
     fs.rmSync(destinationPath, { recursive: true, force: true });
   }
 
-  fs.cpSync(sourcePath, destinationPath, { recursive: true });
-  renderStep("Prompts loaded -> ~/.hive/prompts/");
+  fs.mkdirSync(destinationPath, { recursive: true });
+  const copiedFiles = syncPromptFiles(sourcePath, destinationPath, force);
+
+  if (copiedFiles === 0) {
+    renderStep("Prompts already up to date -> ~/.hive/prompts/");
+    return;
+  }
+
+  renderStep(`Prompts loaded -> ~/.hive/prompts/ (${copiedFiles} files)`);
+}
+
+function syncPromptFiles(
+  sourceDirectory: string,
+  destinationDirectory: string,
+  overwriteExisting: boolean,
+): number {
+  let copiedCount = 0;
+  const entries = fs.readdirSync(sourceDirectory, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const sourceEntryPath = join(sourceDirectory, entry.name);
+    const destinationEntryPath = join(destinationDirectory, entry.name);
+
+    if (entry.isDirectory()) {
+      fs.mkdirSync(destinationEntryPath, { recursive: true });
+      copiedCount += syncPromptFiles(
+        sourceEntryPath,
+        destinationEntryPath,
+        overwriteExisting,
+      );
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    if (!overwriteExisting && fs.existsSync(destinationEntryPath)) {
+      continue;
+    }
+
+    fs.copyFileSync(sourceEntryPath, destinationEntryPath);
+    copiedCount += 1;
+  }
+
+  return copiedCount;
 }
