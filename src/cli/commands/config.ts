@@ -1,4 +1,5 @@
 import process from "node:process";
+import * as readline from "node:readline";
 
 import { Command } from "commander";
 import inquirer from "inquirer";
@@ -34,6 +35,20 @@ import {
 
 const KEYCHAIN_SERVICE = "hive";
 const THEME_LABEL_WIDTH = 8;
+const ENTER_ALT_SCREEN = "\u001B[?1049h";
+const EXIT_ALT_SCREEN = "\u001B[?1049l";
+const CLEAR_SCREEN = "\u001B[H\u001B[2J";
+const THEME_SELECTOR_TITLE = "COMMAND CENTRE · CONFIG · THEME";
+const THEME_SELECTOR_MAX_SEPARATOR_WIDTH = 72;
+const THEME_SELECTOR_MIN_SEPARATOR_WIDTH = 24;
+const THEME_WORDMARK_LINES = [
+  "  ██╗  ██╗██╗██╗   ██╗███████╗",
+  "  ██║  ██║██║██║   ██║██╔════╝",
+  "  ███████║██║██║   ██║█████╗  ",
+  "  ██╔══██║██║╚██╗ ██╔╝██╔══╝  ",
+  "  ██║  ██║██║ ╚████╔╝ ███████╗",
+  "  ╚═╝  ╚═╝╚═╝  ╚═══╝  ╚══════╝",
+] as const;
 
 interface ConfigShowRenderOptions {
   showHeader?: boolean;
@@ -41,6 +56,12 @@ interface ConfigShowRenderOptions {
 
 interface ConfigInteractiveRenderOptions {
   showHeader?: boolean;
+}
+
+interface ThemeOption {
+  name: ThemeName;
+  hex: string;
+  description?: string;
 }
 
 export function registerConfigCommand(program: Command): void {
@@ -326,47 +347,13 @@ export async function runConfigThemeCommandWithOptions(
     ensureInteractiveTerminal("`hive config theme` requires an interactive terminal.");
 
     const currentTheme = getTheme();
-    const customDotHex = currentTheme.name === "custom" ? currentTheme.hex : DEFAULT_THEME_HEX;
-    const themeChoices = [
-      {
-        name: formatThemeChoice("amber", BUILT_IN_THEMES.amber, "default — beehive"),
-        value: "amber",
-      },
-      {
-        name: formatThemeChoice("cyan", BUILT_IN_THEMES.cyan),
-        value: "cyan",
-      },
-      {
-        name: formatThemeChoice("rose", BUILT_IN_THEMES.rose),
-        value: "rose",
-      },
-      {
-        name: formatThemeChoice("slate", BUILT_IN_THEMES.slate),
-        value: "slate",
-      },
-      {
-        name: formatThemeChoice("green", BUILT_IN_THEMES.green),
-        value: "green",
-      },
-      {
-        name: formatThemeChoice("custom", customDotHex, "user provided hex"),
-        value: "custom",
-      },
-    ] as const;
+    const themeOptions = buildThemeOptions(currentTheme.hex, currentTheme.name);
 
     spinner.stop();
 
-    const { theme } = (await inquirer.prompt([
-      {
-        type: "list",
-        name: "theme",
-        message: "Select a theme:",
-        default: currentTheme.name,
-        choices: themeChoices,
-      },
-    ])) as { theme: ThemeName };
+    const theme = await selectThemeOption(themeOptions, currentTheme.name);
 
-    let themeHex = theme === "custom" ? currentTheme.hex : BUILT_IN_THEMES[theme];
+    let themeHex = resolveThemeHex(theme, currentTheme.hex);
 
     if (theme === "custom") {
       const answer = (await inquirer.prompt([
@@ -414,6 +401,162 @@ function formatThemeChoice(name: string, hex: string, description?: string): str
   const paddedName = name.padEnd(THEME_LABEL_WIDTH, " ");
   const descriptionSuffix = description ? ` (${description})` : "";
   return `${dot} ${paddedName} ${hex}${descriptionSuffix}`;
+}
+
+function buildThemeOptions(currentHex: string, currentTheme: ThemeName): ThemeOption[] {
+  const customHex = currentTheme === "custom" ? currentHex : DEFAULT_THEME_HEX;
+  return [
+    {
+      name: "amber",
+      hex: BUILT_IN_THEMES.amber,
+      description: "default — beehive",
+    },
+    { name: "cyan", hex: BUILT_IN_THEMES.cyan },
+    { name: "rose", hex: BUILT_IN_THEMES.rose },
+    { name: "slate", hex: BUILT_IN_THEMES.slate },
+    { name: "green", hex: BUILT_IN_THEMES.green },
+    { name: "custom", hex: customHex, description: "user provided hex" },
+  ];
+}
+
+function resolveThemeHex(theme: ThemeName, currentHex: string): string {
+  if (theme === "custom") {
+    return currentHex;
+  }
+
+  return BUILT_IN_THEMES[theme];
+}
+
+async function selectThemeOption(
+  themeOptions: ThemeOption[],
+  currentTheme: ThemeName,
+): Promise<ThemeName> {
+  const input = process.stdin;
+  const output = process.stdout;
+  readline.emitKeypressEvents(input);
+
+  const defaultIndex = themeOptions.findIndex((option) => option.name === currentTheme);
+  let selectedIndex = defaultIndex >= 0 ? defaultIndex : 0;
+  const wasRaw = input.isRaw ?? false;
+
+  if (!wasRaw) {
+    input.setRawMode(true);
+  }
+  input.resume();
+  output.write(ENTER_ALT_SCREEN);
+
+  return new Promise<ThemeName>((resolve, reject) => {
+    const cleanup = () => {
+      input.off("keypress", onKeypress);
+      if (!wasRaw) {
+        input.setRawMode(false);
+      }
+      output.write(EXIT_ALT_SCREEN);
+    };
+
+    const render = () => {
+      const selectedOption = themeOptions[selectedIndex] ?? themeOptions[0];
+      const accent = applyTheme(selectedOption?.hex ?? DEFAULT_THEME_HEX);
+      const terminalWidth = getThemeSelectorTerminalWidth(output.columns);
+      const headerLines = renderThemeSelectorHeader(accent, terminalWidth);
+      const lines = [
+        ...headerLines,
+        "",
+        "Select a theme (live preview):",
+        "",
+        ...themeOptions.map((option, index) => {
+          const marker = index === selectedIndex ? accent("›") : " ";
+          return `${marker} ${formatThemeChoice(option.name, option.hex, option.description)}`;
+        }),
+        "",
+        accent("Preview"),
+        `${accent("✓")} Theme set. The Hive is now yours.`,
+        `${accent("›")} Step indicator`,
+        `${accent("you›")} prompt  ${accent("hive›")} agent`,
+        accent("────────────────────────────────────────"),
+        "",
+        "Enter to apply, Esc to cancel",
+      ];
+
+      output.write(`${CLEAR_SCREEN}${lines.join("\n")}`);
+    };
+
+    const onKeypress = (keyText: string, key: readline.Key) => {
+      if ((key.ctrl && key.name === "c") || key.name === "escape") {
+        cleanup();
+        reject(new Error("Theme selection cancelled."));
+        return;
+      }
+
+      if (key.name === "up") {
+        selectedIndex =
+          selectedIndex > 0 ? selectedIndex - 1 : themeOptions.length - 1;
+        render();
+        return;
+      }
+
+      if (key.name === "down") {
+        selectedIndex =
+          selectedIndex < themeOptions.length - 1 ? selectedIndex + 1 : 0;
+        render();
+        return;
+      }
+
+      if (key.name === "return" || key.name === "enter") {
+        const selectedOption = themeOptions[selectedIndex];
+        cleanup();
+        resolve(selectedOption?.name ?? "amber");
+        return;
+      }
+
+      const digit = Number.parseInt(keyText, 10);
+      if (!Number.isNaN(digit) && digit >= 1 && digit <= themeOptions.length) {
+        selectedIndex = digit - 1;
+        render();
+      }
+    };
+
+    input.on("keypress", onKeypress);
+    render();
+  });
+}
+
+function renderThemeSelectorHeader(
+  accent: ReturnType<typeof applyTheme>,
+  terminalWidth: number,
+): string[] {
+  const separator = "─".repeat(getThemeSelectorSeparatorWidth(terminalWidth));
+  const centredWordmark = THEME_WORDMARK_LINES.map((line) =>
+    accent.bold(centerText(line, terminalWidth)),
+  );
+
+  return [
+    ...centredWordmark,
+    accent(centerText(THEME_SELECTOR_TITLE, terminalWidth)),
+    accent(centerText(separator, terminalWidth)),
+  ];
+}
+
+function getThemeSelectorTerminalWidth(columns: number | undefined): number {
+  if (typeof columns !== "number" || columns < 20) {
+    return 80;
+  }
+
+  return columns;
+}
+
+function getThemeSelectorSeparatorWidth(terminalWidth: number): number {
+  const usableWidth = Math.max(THEME_SELECTOR_MIN_SEPARATOR_WIDTH, terminalWidth - 8);
+  return Math.min(THEME_SELECTOR_MAX_SEPARATOR_WIDTH, usableWidth);
+}
+
+function centerText(value: string, totalWidth: number): string {
+  if (value.length >= totalWidth) {
+    return value;
+  }
+
+  const leftPadding = Math.floor((totalWidth - value.length) / 2);
+  return `${" ".repeat(leftPadding)}${value}`;
 }
 
 async function getKeyStatus(provider: ProviderName): Promise<"set" | "not set"> {
