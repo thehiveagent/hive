@@ -220,6 +220,11 @@ export async function runChatCommand(options: ChatCommandOptions): Promise<void>
         continue;
       }
 
+      if (prompt === "/") {
+        printChatHelp();
+        continue;
+      }
+
       if (prompt === "/help") {
         printChatHelp();
         continue;
@@ -237,6 +242,12 @@ export async function runChatCommand(options: ChatCommandOptions): Promise<void>
 
       try {
         if (await handleHiveShortcut(prompt)) {
+          continue;
+        }
+
+        if (isUnknownSlashCommand(prompt)) {
+          renderError(`Unknown command: ${prompt}`);
+          renderInfo("Run `/help` to view supported commands.");
           continue;
         }
 
@@ -360,6 +371,11 @@ async function runPreviewSession(options: ChatCommandOptions): Promise<void> {
       continue;
     }
 
+    if (prompt === "/") {
+      printChatHelp();
+      continue;
+    }
+
     if (prompt === "/help") {
       printChatHelp();
       continue;
@@ -379,6 +395,12 @@ async function runPreviewSession(options: ChatCommandOptions): Promise<void> {
       continue;
     }
 
+    if (isUnknownSlashCommand(prompt)) {
+      renderError(`Unknown command: ${prompt}`);
+      renderInfo("Run `/help` to view supported commands.");
+      continue;
+    }
+
     await streamPreviewReply(prompt, agentName);
   }
 }
@@ -392,12 +414,42 @@ async function streamPreviewReply(prompt: string, agentName: string): Promise<vo
 }
 
 function isHiveShortcut(prompt: string): boolean {
-  return prompt.trim().toLowerCase().startsWith(`${HIVE_SHORTCUT_PREFIX} `);
+  const normalized = prompt.trim().toLowerCase();
+  return normalized === HIVE_SHORTCUT_PREFIX || normalized.startsWith(`${HIVE_SHORTCUT_PREFIX} `);
+}
+
+function isUnknownSlashCommand(prompt: string): boolean {
+  const normalized = prompt.trim().toLowerCase();
+  if (!normalized.startsWith("/")) {
+    return false;
+  }
+
+  if (
+    normalized === "/help" ||
+    normalized === "/new" ||
+    normalized === "/exit" ||
+    normalized === "/quit" ||
+    normalized === "/browse" ||
+    normalized.startsWith("/browse ") ||
+    normalized === "/search" ||
+    normalized.startsWith("/search ") ||
+    normalized === HIVE_SHORTCUT_PREFIX ||
+    normalized.startsWith(`${HIVE_SHORTCUT_PREFIX} `)
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 async function handleHiveShortcut(prompt: string): Promise<boolean> {
   const normalized = prompt.trim().replace(/\s+/g, " ");
   const lower = normalized.toLowerCase();
+
+  if (lower === HIVE_SHORTCUT_PREFIX) {
+    renderInfo(HIVE_SHORTCUT_HELP_TEXT);
+    return true;
+  }
 
   if (!lower.startsWith(`${HIVE_SHORTCUT_PREFIX} `)) {
     return false;
@@ -483,6 +535,7 @@ async function readPromptWithSuggestions(): Promise<string> {
 
     let buffer = "";
     let selectedSuggestionIndex = 0;
+    let renderedSuggestionRows = 0;
 
     const cleanup = () => {
       stdin.off("keypress", onKeypress);
@@ -492,10 +545,41 @@ async function readPromptWithSuggestions(): Promise<string> {
     };
 
     const commit = () => {
-      const value = buffer.trim();
+      const suggestions = getCommandSuggestions(buffer);
+      const selected = suggestions[selectedSuggestionIndex];
+      let value = buffer.trim();
+
+      if (
+        selected &&
+        value.startsWith("/") &&
+        (value === "/" ||
+          selected.insertText.toLowerCase().startsWith(value.toLowerCase()) ||
+          selected.label.toLowerCase().startsWith(value.toLowerCase()))
+      ) {
+        value = selected.insertText.trimEnd();
+      }
+
+      if (value === "/") {
+        value = "/help";
+      }
+
       readline.cursorTo(stdout, 0);
-      readline.clearScreenDown(stdout);
-      stdout.write(chalk.whiteBright(`${USER_PROMPT}${buffer}\n`));
+      readline.clearLine(stdout, 0);
+      stdout.write(chalk.whiteBright(`${USER_PROMPT}${buffer}`));
+
+      for (let index = 0; index < renderedSuggestionRows; index += 1) {
+        readline.moveCursor(stdout, 0, 1);
+        readline.cursorTo(stdout, 0);
+        readline.clearLine(stdout, 0);
+      }
+
+      for (let index = 0; index < renderedSuggestionRows; index += 1) {
+        readline.moveCursor(stdout, 0, -1);
+      }
+
+      renderedSuggestionRows = 0;
+      readline.cursorTo(stdout, USER_PROMPT.length + buffer.length);
+      stdout.write("\n");
       cleanup();
       resolve(value);
     };
@@ -507,25 +591,37 @@ async function readPromptWithSuggestions(): Promise<string> {
       }
 
       readline.cursorTo(stdout, 0);
-      readline.clearScreenDown(stdout);
+      readline.clearLine(stdout, 0);
       stdout.write(chalk.whiteBright(`${USER_PROMPT}${buffer}`));
 
-      if (suggestions.length === 0) {
-        return;
-      }
+      const rowsToRender = Math.max(renderedSuggestionRows, suggestions.length);
+      for (let index = 0; index < rowsToRender; index += 1) {
+        readline.moveCursor(stdout, 0, 1);
+        readline.cursorTo(stdout, 0);
+        readline.clearLine(stdout, 0);
 
-      stdout.write("\n");
+        if (index >= suggestions.length) {
+          continue;
+        }
 
-      for (let index = 0; index < suggestions.length; index += 1) {
         const suggestion = suggestions[index];
         const marker = index === selectedSuggestionIndex ? ">" : " ";
         const label = suggestion.label.padEnd(COMMAND_LABEL_WIDTH, " ");
-        stdout.write(chalk.dim(`${marker} ${label} ${suggestion.description}`));
-        stdout.write("\n");
+        const text = `${marker} ${label} ${suggestion.description}`;
+
+        if (index === selectedSuggestionIndex) {
+          stdout.write(chalk.whiteBright(text));
+        } else {
+          stdout.write(chalk.dim(text));
+        }
       }
 
-      readline.moveCursor(stdout, 0, -suggestions.length);
+      for (let index = 0; index < rowsToRender; index += 1) {
+        readline.moveCursor(stdout, 0, -1);
+      }
+
       readline.cursorTo(stdout, USER_PROMPT.length + buffer.length);
+      renderedSuggestionRows = suggestions.length;
     };
 
     const onKeypress = (str: string, key: readline.Key) => {
@@ -536,6 +632,27 @@ async function readPromptWithSuggestions(): Promise<string> {
       }
 
       if (key.name === "return" || key.name === "enter") {
+        const suggestions = getCommandSuggestions(buffer);
+        const selected = suggestions[selectedSuggestionIndex];
+        const trimmed = buffer.trim();
+
+        if (
+          selected &&
+          trimmed.startsWith("/") &&
+          (trimmed === "/" ||
+            selected.insertText.toLowerCase().startsWith(trimmed.toLowerCase()) ||
+            selected.label.toLowerCase().startsWith(trimmed.toLowerCase()))
+        ) {
+          buffer = selected.insertText;
+          selectedSuggestionIndex = 0;
+
+          // Commands that expect extra input should stay in edit mode.
+          if (buffer.endsWith(" ")) {
+            render();
+            return;
+          }
+        }
+
         commit();
         return;
       }
