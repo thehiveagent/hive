@@ -76,9 +76,9 @@ npm install -g @imisbahk/hive@0.1.1
 npm install -g @imisbahk/hive@0.1.2
 ```
 
-## 🐝 v0.2.0 — Doctor (Health Checks)
+## 🐝 v0.1.3 — Doctor (Health Checks)
 
-### What's in v0.2.0
+### What's in v0.1.3
 
 - New `hive doctor` command runs a full diagnostic pass across local Hive setup.
 - Live, sequential output (no spinner) so checks feel immediate as they complete.
@@ -97,5 +97,5 @@ npm install -g @imisbahk/hive@0.1.2
 ### Upgrade
 
 ```bash
-npm install -g @imisbahk/hive@0.2.0
+npm install -g @imisbahk/hive@0.1.3
 ```

@@ -1,0 +1,43 @@
+name: Stale Issues
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # runs daily at midnight
+  workflow_dispatch:
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+          # Issues
+          days-before-issue-stale: 30
+          days-before-issue-close: 7
+          stale-issue-label: stale
+          stale-issue-message: >
+            This issue has been inactive for 30 days.
+            If it's still relevant, leave a comment and it'll stay open.
+            Otherwise it will be closed in 7 days.
+          close-issue-message: >
+            Closing due to inactivity. Reopen anytime if this is still relevant.
+
+          # PRs
+          days-before-pr-stale: 21
+          days-before-pr-close: 7
+          stale-pr-label: stale
+          stale-pr-message: >
+            This PR has been inactive for 21 days.
+            Leave a comment or push a commit to keep it open.
+            Otherwise it will be closed in 7 days.
+          close-pr-message: >
+            Closing due to inactivity. Reopen anytime if this is still relevant.
+
+          # Never mark these as stale
+          exempt-issue-labels: 'pinned,security,roadmap,bug'
+          exempt-pr-labels: 'pinned,security,work-in-progress'
+
+          # Only process 30 at a time
+          operations-per-run: 30

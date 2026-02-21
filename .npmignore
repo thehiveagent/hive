@@ -1,0 +1,54 @@
+# Source
+src/
+*.ts
+!dist/**/*.d.ts
+
+# Docs
+docs/
+*.md
+!README.md
+
+# Config
+.github/
+.vscode/
+.cursor/
+*.config.js
+*.config.ts
+tsconfig.json
+.eslintrc*
+.prettierrc*
+.editorconfig
+.nvmrc
+.npmrc
+
+# Tests
+**/*.test.ts
+**/*.spec.ts
+coverage/
+
+# Dev
+.env
+.env.*
+*.log
+tmp/
+temp/
+
+# Hive runtime
+.hive/
+
+# OS
+.DS_Store
+Thumbs.db
+
+
+
+
+
+
+
+
+
+
+
+
+
