@@ -23,8 +23,10 @@ import {
   runConfigModelCommandWithOptions,
   runConfigProviderCommandWithOptions,
   runConfigShowCommandWithOptions,
+  runConfigThemeCommandWithOptions,
 } from "./config.js";
 import { runStatusCommandWithOptions } from "./status.js";
+import { getTheme } from "../theme.js";
 
 interface ChatCommandOptions {
   message?: string;
@@ -53,7 +55,8 @@ interface CommandSuggestion {
 
 type HiveShortcutResult = "not-handled" | "handled" | "config-updated";
 
-const USER_PROMPT = "you› ";
+const PROMPT_SYMBOL = "›";
+const USER_PROMPT = `you${PROMPT_SYMBOL} `;
 const HIVE_SHORTCUT_PREFIX = "/hive";
 const MAX_COMMAND_SUGGESTIONS = 8;
 const COMMAND_LABEL_WIDTH = 24;
@@ -71,6 +74,7 @@ const COMMAND_HELP_TEXT = [
   "  /hive config provider interactive provider setup",
   "  /hive config model interactive model setup",
   "  /hive config key interactive key setup",
+  "  /hive config theme interactive theme setup",
   "  /exit           quit",
 ].join("\n");
 const HIVE_SHORTCUT_HELP_TEXT = [
@@ -83,6 +87,7 @@ const HIVE_SHORTCUT_HELP_TEXT = [
   "  /hive config provider",
   "  /hive config model",
   "  /hive config key",
+  "  /hive config theme",
   "",
   "Safety commands still run from shell:",
   "  /hive init",
@@ -154,6 +159,11 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
     label: "/hive config key",
     insertText: "/hive config key",
     description: "interactive key setup",
+  },
+  {
+    label: "/hive config theme",
+    insertText: "/hive config theme",
+    description: "interactive theme setup",
   },
   {
     label: "/hive nuke",
@@ -327,7 +337,7 @@ async function streamReply(
   options: RunChatOptions,
   agentName: string,
 ): Promise<string> {
-  process.stdout.write(chalk.whiteBright(`${agentName}› `));
+  process.stdout.write(getTheme().accent(`${agentName}${PROMPT_SYMBOL} `));
 
   let activeConversationId = conversationId;
 
@@ -457,7 +467,7 @@ async function runPreviewSession(options: ChatCommandOptions): Promise<void> {
 
 async function streamPreviewReply(prompt: string, agentName: string): Promise<void> {
   const response = `preview mode: received "${prompt}"`;
-  process.stdout.write(chalk.whiteBright(`${agentName}› `));
+  process.stdout.write(getTheme().accent(`${agentName}${PROMPT_SYMBOL} `));
   process.stdout.write(response);
   process.stdout.write("\n");
   renderSeparator(EXCHANGE_SEPARATOR);
@@ -563,6 +573,17 @@ async function handleHiveShortcut(
     return "handled";
   }
 
+  if (subcommand === "config theme") {
+    if (!options.allowInteractiveConfig) {
+      renderInfo("Interactive config commands are unavailable here.");
+      return "handled";
+    }
+
+    await runConfigThemeCommandWithOptions({ showHeader: false });
+    restoreChatInputAfterInteractiveCommand();
+    return "handled";
+  }
+
   if (
     subcommand === "init" ||
     subcommand === "nuke"
@@ -598,6 +619,9 @@ function getCommandSuggestions(input: string): CommandSuggestion[] {
 }
 
 async function readPromptWithSuggestions(): Promise<string> {
+  const accent = getTheme().accent;
+  const promptPrefix = accent(USER_PROMPT);
+
   if (!stdin.isTTY || !stdout.isTTY) {
     const rl = createInterface({
       input: stdin,
@@ -606,7 +630,7 @@ async function readPromptWithSuggestions(): Promise<string> {
     });
 
     try {
-      return (await rl.question(chalk.whiteBright(USER_PROMPT))).trim();
+      return (await rl.question(promptPrefix)).trim();
     } finally {
       rl.close();
     }
@@ -654,7 +678,7 @@ async function readPromptWithSuggestions(): Promise<string> {
 
       readline.cursorTo(stdout, 0);
       readline.clearLine(stdout, 0);
-      stdout.write(chalk.whiteBright(`${USER_PROMPT}${buffer}`));
+      stdout.write(`${promptPrefix}${buffer}`);
 
       for (let index = 0; index < renderedSuggestionRows; index += 1) {
         readline.moveCursor(stdout, 0, 1);
@@ -700,7 +724,7 @@ async function readPromptWithSuggestions(): Promise<string> {
 
       readline.cursorTo(stdout, 0);
       readline.clearLine(stdout, 0);
-      stdout.write(chalk.whiteBright(`${USER_PROMPT}${buffer}`));
+      stdout.write(`${promptPrefix}${buffer}`);
 
       const rowsToRender = Math.max(renderedSuggestionRows, visibleSuggestions.length);
       for (let index = 0; index < rowsToRender; index += 1) {
@@ -719,7 +743,7 @@ async function readPromptWithSuggestions(): Promise<string> {
         const text = `${marker} ${label} ${suggestion.description}`;
 
         if (absoluteIndex === selectedSuggestionIndex) {
-          stdout.write(chalk.whiteBright(text));
+          stdout.write(accent(text));
         } else {
           stdout.write(chalk.dim(text));
         }

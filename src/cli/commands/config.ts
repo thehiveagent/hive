@@ -16,6 +16,14 @@ import {
   renderSuccess,
 } from "../ui.js";
 import {
+  BUILT_IN_THEMES,
+  DEFAULT_THEME_HEX,
+  applyTheme,
+  getTheme,
+  isValidHexColor,
+  type ThemeName,
+} from "../theme.js";
+import {
   closeHiveDatabase,
   getPrimaryAgent,
   openHiveDatabase,
@@ -25,6 +33,7 @@ import {
 } from "../../storage/db.js";
 
 const KEYCHAIN_SERVICE = "hive";
+const THEME_LABEL_WIDTH = 8;
 
 interface ConfigShowRenderOptions {
   showHeader?: boolean;
@@ -37,7 +46,7 @@ interface ConfigInteractiveRenderOptions {
 export function registerConfigCommand(program: Command): void {
   const configCommand = program
     .command("config")
-    .description("Update provider, model, or API keys without re-running init");
+    .description("Update provider, model, theme, or API keys without re-running init");
 
   configCommand
     .command("provider")
@@ -65,6 +74,13 @@ export function registerConfigCommand(program: Command): void {
     .description("Show current provider, model, and key status")
     .action(async () => {
       await runConfigShowCommand();
+    });
+
+  configCommand
+    .command("theme")
+    .description("Change CLI accent theme")
+    .action(async () => {
+      await runConfigThemeCommand();
     });
 
   configCommand.action(() => {
@@ -262,6 +278,10 @@ export async function runConfigShowCommand(): Promise<void> {
   await runConfigShowCommandWithOptions();
 }
 
+export async function runConfigThemeCommand(): Promise<void> {
+  await runConfigThemeCommandWithOptions();
+}
+
 export async function runConfigShowCommandWithOptions(
   options: ConfigShowRenderOptions = {},
 ): Promise<void> {
@@ -291,6 +311,93 @@ export async function runConfigShowCommandWithOptions(
   }
 }
 
+export async function runConfigThemeCommandWithOptions(
+  options: ConfigInteractiveRenderOptions = {},
+): Promise<void> {
+  const showHeader = options.showHeader ?? true;
+  if (showHeader) {
+    renderHiveHeader("Config · Theme");
+  }
+
+  const spinner = ora("Loading themes...").start();
+  const db = openHiveDatabase();
+
+  try {
+    ensureInteractiveTerminal("`hive config theme` requires an interactive terminal.");
+
+    const currentTheme = getTheme();
+    const customDotHex = currentTheme.name === "custom" ? currentTheme.hex : DEFAULT_THEME_HEX;
+    const themeChoices = [
+      {
+        name: formatThemeChoice("amber", BUILT_IN_THEMES.amber, "default — beehive"),
+        value: "amber",
+      },
+      {
+        name: formatThemeChoice("cyan", BUILT_IN_THEMES.cyan),
+        value: "cyan",
+      },
+      {
+        name: formatThemeChoice("rose", BUILT_IN_THEMES.rose),
+        value: "rose",
+      },
+      {
+        name: formatThemeChoice("slate", BUILT_IN_THEMES.slate),
+        value: "slate",
+      },
+      {
+        name: formatThemeChoice("green", BUILT_IN_THEMES.green),
+        value: "green",
+      },
+      {
+        name: formatThemeChoice("custom", customDotHex, "user provided hex"),
+        value: "custom",
+      },
+    ] as const;
+
+    spinner.stop();
+
+    const { theme } = (await inquirer.prompt([
+      {
+        type: "list",
+        name: "theme",
+        message: "Select a theme:",
+        default: currentTheme.name,
+        choices: themeChoices,
+      },
+    ])) as { theme: ThemeName };
+
+    let themeHex = theme === "custom" ? currentTheme.hex : BUILT_IN_THEMES[theme];
+
+    if (theme === "custom") {
+      const answer = (await inquirer.prompt([
+        {
+          type: "input",
+          name: "hex",
+          message: "Enter hex color: #",
+          default: currentTheme.name === "custom" ? currentTheme.hex : undefined,
+          validate: validateHexColor,
+        },
+      ])) as { hex: string };
+
+      themeHex = normalizeHexColor(answer.hex);
+    }
+
+    spinner.start("Saving theme...");
+    setMetaValue(db, "theme", theme);
+    setMetaValue(db, "theme_hex", themeHex);
+    spinner.succeed("Theme saved.");
+
+    console.log(applyTheme(themeHex)("✓ Theme set. The Hive is now yours."));
+  } catch (error) {
+    if (spinner.isSpinning) {
+      spinner.fail("Failed to update theme.");
+    }
+    throw error;
+  } finally {
+    closeHiveDatabase(db);
+  }
+}
+
 function ensureInteractiveTerminal(errorMessage: string): void {
   if (!process.stdin.isTTY) {
     throw new Error(errorMessage);
@@ -300,6 +407,13 @@ function ensureInteractiveTerminal(errorMessage: string): void {
 function printCurrentProviderAndModel(provider: ProviderName, model: string): void {
   renderInfo(`Current provider: ${provider}`);
   renderInfo(`Current model: ${model}`);
+}
+
+function formatThemeChoice(name: string, hex: string, description?: string): string {
+  const dot = applyTheme(hex)("●");
+  const paddedName = name.padEnd(THEME_LABEL_WIDTH, " ");
+  const descriptionSuffix = description ? ` (${description})` : "";
+  return `${dot} ${paddedName} ${hex}${descriptionSuffix}`;
 }
 
 async function getKeyStatus(provider: ProviderName): Promise<"set" | "not set"> {
@@ -338,6 +452,14 @@ function requiredField(message: string): (value: string) => true | string {
 
     return message;
   };
+}
+
+function validateHexColor(value: string): true | string {
+  return isValidHexColor(value.trim()) || "Use #RRGGBB format.";
+}
+
+function normalizeHexColor(value: string): string {
+  return value.trim().toUpperCase();
 }
 
 function assertNever(value: never): never {

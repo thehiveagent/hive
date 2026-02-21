@@ -105,7 +105,7 @@ async function getApiKeyStatus(providerName: string): Promise<string> {
 
 function printStatusLine(label: string, value: string): void {
   const paddedLabel = `${label}:`.padEnd(10, " ");
-  console.log(`${chalk.dim(paddedLabel)} ${chalk.whiteBright(value)}`);
+  console.log(`${chalk.dim(paddedLabel)} ${value}`);
 }
 
 function getFileSize(path: string): number {

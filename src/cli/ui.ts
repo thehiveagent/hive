@@ -3,6 +3,8 @@ import process from "node:process";
 
 import chalk from "chalk";
 
+import { getTheme } from "./theme.js";
+
 const WORDMARK_LINES = [
   "  ██╗  ██╗██╗██╗   ██╗███████╗",
   "  ██║  ██║██║██║   ██║██╔════╝",
@@ -21,9 +23,10 @@ let cachedVersion: string | null = null;
 export function renderHiveHeader(pageTitle?: string): void {
   const terminalWidth = getTerminalWidth();
   const separator = "─".repeat(getSeparatorWidth(terminalWidth));
+  const accent = getTheme().accent;
 
   for (const line of WORDMARK_LINES) {
-    console.log(chalk.bold.whiteBright(centerText(line, terminalWidth)));
+    console.log(accent.bold(centerText(line, terminalWidth)));
   }
 
   console.log("");
@@ -34,12 +37,13 @@ export function renderHiveHeader(pageTitle?: string): void {
     ? `${COMMAND_CENTRE_LABEL} · ${normalizedTitle}`
     : COMMAND_CENTRE_LABEL;
 
-  console.log(chalk.whiteBright(centerText(commandCentreTitle, terminalWidth)));
-  console.log(chalk.dim(centerText(separator, terminalWidth)));
+  console.log(accent(centerText(commandCentreTitle, terminalWidth)));
+  console.log(accent(centerText(separator, terminalWidth)));
 }
 
 export function renderSuccess(message: string): void {
-  console.log(chalk.green(message));
+  const accent = getTheme().accent;
+  console.log(`${accent("✓")} ${message}`);
 }
 
 export function renderError(message: string): void {
@@ -47,7 +51,8 @@ export function renderError(message: string): void {
 }
 
 export function renderStep(message: string): void {
-  console.log(chalk.whiteBright(message));
+  const accent = getTheme().accent;
+  console.log(`${accent("›")} ${message}`);
 }
 
 export function renderInfo(message: string): void {
@@ -55,12 +60,14 @@ export function renderInfo(message: string): void {
 }
 
 export function renderSeparator(text?: string): void {
+  const accent = getTheme().accent;
+
   if (text) {
-    console.log(chalk.dim(text));
+    console.log(accent(text));
     return;
   }
 
-  console.log(chalk.dim("─".repeat(getSeparatorWidth(getTerminalWidth()))));
+  console.log(accent("─".repeat(getSeparatorWidth(getTerminalWidth()))));
 }
 
 function getCliVersion(): string {
