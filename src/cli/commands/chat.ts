@@ -39,7 +39,9 @@ const COMMAND_HELP_TEXT = [
   "  /help           show commands",
   "  /new            start a new conversation",
   "  /browse <url>   read a webpage",
+  "  browse <url>    same as /browse",
   "  /search <query> search the web",
+  "  search <query>  same as /search",
   "  /exit           quit",
 ].join("\n");
 const CHAT_HINT_TEXT = "? for help | /exit to quit";
@@ -102,7 +104,9 @@ export async function runChatCommand(options: ChatCommandOptions): Promise<void>
     });
 
     if (options.message) {
-      const augmentedMessage = await buildBrowserAugmentedPrompt(options.message);
+      const augmentedMessage = await buildBrowserAugmentedPrompt(options.message, {
+        locationHint: profile.location,
+      });
       conversationId = await streamReply(
         agent,
         augmentedMessage,
@@ -144,7 +148,9 @@ export async function runChatCommand(options: ChatCommandOptions): Promise<void>
         }
 
         try {
-          const augmentedPrompt = await buildBrowserAugmentedPrompt(prompt);
+          const augmentedPrompt = await buildBrowserAugmentedPrompt(prompt, {
+            locationHint: profile.location,
+          });
           conversationId = await streamReply(
             agent,
             augmentedPrompt,
