@@ -1,4 +1,4 @@
-• v0.1.1 command surface:
+• v0.1.2 command surface:
 
   CLI commands
 
@@ -9,6 +9,7 @@
   - hive config provider → interactive provider/model/key update
   - hive config model → interactive model update
   - hive config key → interactive API key update
+  - hive config theme → interactive accent theme picker (live preview)
   - hive config show → show provider/model/agent/key status
   - hive status → full local status report
   - hive nuke → permanently delete local Hive data + keys
@@ -40,11 +41,17 @@
   - /hive config provider (interactive in chat)
   - /hive config model (interactive in chat)
   - /hive config key (interactive in chat)
+  - /hive config theme (interactive in chat)
   - /hive init and /hive nuke are shell-only safety commands
 
   Current features
 
   - Centered “HIVE / Command Centre” UI across command pages
+  - Unified CLI accent theme system stored in `~/.hive/hive.db`
+  - Built-in themes: amber (default), cyan, rose, slate, green
+  - Custom theme hex support with validation (`^#[0-9A-Fa-f]{6}$`)
+  - Live, real-time theme preview while navigating `hive config theme`
+  - ASCII HIVE wordmark, separators, prompts, step/success indicators now share one accent color
   - Chat-first CLI (hive opens chat)
   - Deprecated hive chat messaging
   - Live / autocomplete with scrollable suggestion viewport

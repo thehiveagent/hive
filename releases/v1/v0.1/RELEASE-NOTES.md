@@ -44,3 +44,34 @@ hive init
 ```bash
 npm install -g @imisbahk/hive@0.1.1
 ```
+
+## 🐝 v0.1.2 — Themes + Live Accent Preview
+
+### What's in v0.1.2
+
+- New `hive config theme` command to set the CLI accent theme.
+- Built-in theme options:
+  - `amber` (`#FFA500`) default beehive accent
+  - `cyan` (`#00BCD4`)
+  - `rose` (`#FF4081`)
+  - `slate` (`#90A4AE`)
+  - `green` (`#00E676`)
+  - `custom` (user-provided hex)
+- Live theme preview: moving through the picker updates the UI accent in real time before selection.
+- Theme persistence in local DB metadata (`~/.hive/hive.db`):
+  - `theme`
+  - `theme_hex`
+- Accent color is now consistent across the command centre UI:
+  - ASCII HIVE wordmark
+  - separators
+  - prompt symbol (`›`)
+  - agent name prefix in chat
+  - success indicator (`✓`)
+  - step indicator (`›`)
+- New in-chat shortcut: `/hive config theme`
+
+### Upgrade
+
+```bash
+npm install -g @imisbahk/hive@0.1.2
+```
