@@ -21,12 +21,6 @@ npm install -g @imisbahk/hive
 hive init
 ````
 
-### What's next
-
-v0.2 — the agent works while you sleep. Background daemon, task queue, scheduled jobs, web browsing.
-
----
-
 ## 🐝 v0.1.1 — Chat-First CLI + Command Centre Upgrades
 
 ### What's in v0.1.1
