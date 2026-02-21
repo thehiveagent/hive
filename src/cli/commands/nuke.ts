@@ -27,7 +27,7 @@ export function registerNukeCommand(program: Command): void {
 }
 
 export async function runNukeCommand(): Promise<void> {
-  renderHiveHeader();
+  renderHiveHeader("Nuke");
   renderError(
     "This will permanently delete your agent, all memory, all conversations, and all keys. This cannot be undone.",
   );

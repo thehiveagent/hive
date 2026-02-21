@@ -66,7 +66,7 @@ export function registerChatCommand(program: Command): void {
 
 export async function runChatCommand(options: ChatCommandOptions): Promise<void> {
   console.clear();
-  renderHiveHeader();
+  renderHiveHeader("Chat");
 
   if (options.preview) {
     await runPreviewSession(options);

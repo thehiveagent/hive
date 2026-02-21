@@ -54,7 +54,7 @@ export function registerInitCommand(program: Command): void {
 }
 
 export async function runInitCommand(options: InitCommandOptions = {}): Promise<void> {
-  renderHiveHeader();
+  renderHiveHeader("Init");
   const spinner = ora("Preparing init...").start();
   const db = openHiveDatabase();
 

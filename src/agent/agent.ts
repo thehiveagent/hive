@@ -24,7 +24,7 @@ import { createProvider } from "../providers/index.js";
 
 const BROWSE_COMMAND_PATTERN = /^\/browse\s+(\S+)(?:\s+([\s\S]+))?$/i;
 const SEARCH_COMMAND_PATTERN = /^\/search\s+([\s\S]+)$/i;
-const URL_PATTERN = /(https?:\/\/[^\s]+)/i;
+const URL_PATTERN = /\b((?:https?:\/\/|www\.)[^\s]+)/i;
 const MAX_TOOL_CALL_ROUNDS = 4;
 const WEB_SEARCH_TOOL: ProviderToolDefinition = {
   type: "function",
@@ -294,6 +294,10 @@ export async function buildBrowserAugmentedPrompt(userPrompt: string): Promise<s
   }
 
   const detectedUrl = normalizeUrlToken(urlMatch[1]);
+  if (!detectedUrl) {
+    return userPrompt;
+  }
+
   return buildBrowserContextMessage({
     sourceLabel: `Browser content from ${detectedUrl}`,
     userPrompt,
@@ -310,10 +314,23 @@ export async function handleBrowseSlashCommand(
   }
 
   const candidateUrl = match[1];
+  const customQuestion = match[2]?.trim();
   const normalizedUrl = normalizeUrlToken(candidateUrl);
+  if (!normalizedUrl) {
+    return buildBrowserContextMessage({
+      sourceLabel: "Browse error",
+      userPrompt: userPrompt.trim(),
+      content:
+        "Invalid URL. Use `/browse <url>` with an http(s) URL or a domain like `example.com`.",
+    });
+  }
+
   return buildBrowserContextMessage({
     sourceLabel: `Browser content from ${normalizedUrl}`,
-    userPrompt,
+    userPrompt:
+      customQuestion && customQuestion.length > 0
+        ? customQuestion
+        : `Summarize the key information from ${normalizedUrl}.`,
     content: await safelyOpenPage(normalizedUrl),
   });
 }
@@ -338,7 +355,7 @@ export async function handleSearchSlashCommand(
   const results = await safelySearch(query);
   return buildBrowserContextMessage({
     sourceLabel: `Search results for \"${query}\"`,
-    userPrompt,
+    userPrompt: query,
     content: formatSearchResults(results),
   });
 }
@@ -384,8 +401,26 @@ function formatSearchResults(results: SearchResult[] | string): string {
     .join("\n\n");
 }
 
-function normalizeUrlToken(value: string): string {
-  return value.trim().replace(/[),.;!?]+$/, "");
+function normalizeUrlToken(value: string): string | null {
+  const cleaned = value.trim().replace(/[),.;!?]+$/, "");
+  if (cleaned.length === 0) {
+    return null;
+  }
+
+  const withProtocol = /^https?:\/\//i.test(cleaned)
+    ? cleaned
+    : `https://${cleaned.replace(/^\/\//, "")}`;
+
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+
+    return parsed.toString();
+  } catch {
+    return null;
+  }
 }
 
 function errorMessage(error: unknown): string {

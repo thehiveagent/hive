@@ -60,13 +60,13 @@ export function registerConfigCommand(program: Command): void {
     });
 
   configCommand.action(() => {
-    renderHiveHeader();
+    renderHiveHeader("Config");
     configCommand.outputHelp();
   });
 }
 
 export async function runConfigProviderCommand(): Promise<void> {
-  renderHiveHeader();
+  renderHiveHeader("Config · Provider");
   const spinner = ora("Loading configuration...").start();
   const db = openHiveDatabase();
 
@@ -135,7 +135,7 @@ export async function runConfigProviderCommand(): Promise<void> {
 }
 
 export async function runConfigModelCommand(): Promise<void> {
-  renderHiveHeader();
+  renderHiveHeader("Config · Model");
   const spinner = ora("Loading configuration...").start();
   const db = openHiveDatabase();
 
@@ -178,7 +178,7 @@ export async function runConfigModelCommand(): Promise<void> {
 }
 
 export async function runConfigKeyCommand(): Promise<void> {
-  renderHiveHeader();
+  renderHiveHeader("Config · Key");
   const spinner = ora("Loading configuration...").start();
   const db = openHiveDatabase();
 
@@ -224,7 +224,7 @@ export async function runConfigKeyCommand(): Promise<void> {
 }
 
 export async function runConfigShowCommand(): Promise<void> {
-  renderHiveHeader();
+  renderHiveHeader("Config · Show");
   const db = openHiveDatabase();
 
   try {

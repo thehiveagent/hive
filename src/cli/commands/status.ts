@@ -34,7 +34,7 @@ export function registerStatusCommand(program: Command): void {
 }
 
 export async function runStatusCommand(): Promise<void> {
-  renderHiveHeader();
+  renderHiveHeader("Status");
   const db = openHiveDatabase();
 
   try {
