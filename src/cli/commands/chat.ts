@@ -105,7 +105,7 @@ export async function runChatCommand(options: ChatCommandOptions): Promise<void>
 
     if (options.message) {
       const augmentedMessage = await buildBrowserAugmentedPrompt(options.message, {
-        locationHint: profile.location,
+        locationHint: profile.location ?? undefined,
       });
       conversationId = await streamReply(
         agent,
@@ -149,7 +149,7 @@ export async function runChatCommand(options: ChatCommandOptions): Promise<void>
 
         try {
           const augmentedPrompt = await buildBrowserAugmentedPrompt(prompt, {
-            locationHint: profile.location,
+            locationHint: profile.location ?? undefined,
           });
           conversationId = await streamReply(
             agent,

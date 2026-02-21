@@ -30,6 +30,10 @@ const MAX_TOOL_CALL_ROUNDS = 4;
 const MAX_SEARCH_QUERY_LENGTH = 300;
 const UNTRUSTED_CONTEXT_START = "----- BEGIN UNTRUSTED CONTEXT -----";
 const UNTRUSTED_CONTEXT_END = "----- END UNTRUSTED CONTEXT -----";
+const TOOL_BOILERPLATE_PATTERN = /helpful assistant with access to the following tools/i;
+const TOOL_PROMPTING_PATTERN = /would you like me to/i;
+const NO_BROWSE_CLAIM_PATTERN =
+  /\b(?:cannot|can't|unable to|do not have|don't have)\b[\s\S]{0,60}\b(?:browse|web|internet|real[- ]?time)\b/i;
 const RUNTIME_SYSTEM_GUARDRAILS = [
   "You are The Hive, a direct and useful local-first agent.",
   "Security rules:",
@@ -200,12 +204,15 @@ export class HiveAgent {
   private async *generateAssistantReply(
     providerRequest: StreamChatRequest,
   ): AsyncGenerator<string> {
+    const latestUserMessage = findLatestUserMessage(providerRequest.messages);
+
     if (!this.provider.completeChat) {
       yield* this.provider.streamChat(providerRequest);
       return;
     }
 
-    const assistantText = await this.completeWithAutomaticTools(providerRequest);
+    const rawAssistantText = await this.completeWithAutomaticTools(providerRequest);
+    const assistantText = normalizeAssistantOutput(rawAssistantText, latestUserMessage);
     yield* chunkText(assistantText);
   }
 
@@ -540,4 +547,49 @@ function parseWebSearchQuery(rawArguments: string): string | null {
   }
 
   return null;
+}
+
+function findLatestUserMessage(messages: ProviderMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user") {
+      return message.content;
+    }
+  }
+
+  return "";
+}
+
+function normalizeAssistantOutput(reply: string, latestUserMessage: string): string {
+  let normalized = reply.trim();
+  if (normalized.length === 0) {
+    return normalized;
+  }
+
+  const searchRequested = SEARCH_COMMAND_PATTERN.test(latestUserMessage.trim());
+  if (
+    searchRequested &&
+    TOOL_BOILERPLATE_PATTERN.test(normalized) &&
+    TOOL_PROMPTING_PATTERN.test(normalized)
+  ) {
+    return "Search received. I ran it and will use those results directly.";
+  }
+
+  if (latestUserMessage.includes(UNTRUSTED_CONTEXT_START)) {
+    normalized = stripUnhelpfulCapabilityClaims(normalized);
+    if (normalized.length === 0) {
+      return "I ran the search step and returned the available results. If you want tighter local matches, share your city or ZIP code.";
+    }
+  }
+
+  return normalized;
+}
+
+function stripUnhelpfulCapabilityClaims(value: string): string {
+  const cleanedLines = value
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => !NO_BROWSE_CLAIM_PATTERN.test(line) && !TOOL_PROMPTING_PATTERN.test(line));
+
+  return cleanedLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
