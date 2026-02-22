@@ -23,11 +23,8 @@ import {
   getPrimaryAgent,
   getHiveHomeDir,
   insertKnowledge,
-  insertEpisode,
-  listPinnedKnowledge,
-  listKnowledge,
-  findRelevantEpisodes,
   type KnowledgeRecord,
+  listKnowledge,
   type MessageRecord,
   listConversationMessages,
   listRecentConversations,
@@ -366,11 +363,7 @@ export async function runChatCommand(
       const augmentedMessage = await buildBrowserAugmentedPrompt(options.message, {
         locationHint: profile.location ?? undefined,
       });
-      const memoryAddition = buildMemoryAddition(db, options.message);
-      const systemAddition = combineSystemAdditions([
-        getModeSystemPrompt(currentMode),
-        memoryAddition,
-      ]);
+      const systemAddition = getModeSystemPrompt(currentMode);
       lastUserPromptRef.value = options.message;
       const streamResult = await streamReply(
         agent,
@@ -382,7 +375,6 @@ export async function runChatCommand(
       );
       conversationId = streamResult.conversationId;
       lastAssistantRef.value = streamResult.assistantText;
-      saveEpisodeSummary(db, options.message, streamResult.assistantText);
       renderInfo(`conversation: ${conversationId}`);
       return;
     }
@@ -410,99 +402,94 @@ export async function runChatCommand(
         break;
       }
 
-        if (normalizedPrompt === "/new") {
+      if (normalizedPrompt === "/new") {
+        conversationId = undefined;
+        currentMode = "default";
+        lastUserPromptRef.value = null;
+        lastAssistantRef.value = "";
+        renderInfo("Started a new conversation context.");
+        continue;
+      }
+
+      try {
+        const handled = await handleChatSlashCommand({
+          prompt,
+          db,
+          agent,
+          provider,
+          agentName,
+          conversationId,
+          activeProfilePersona: activeProfile.persona,
+          mode: currentMode,
+          providerName: activeProfile.provider,
+          modelName: runOptions.model ?? activeProfile.model,
+          setConversationId: (id) => {
+            conversationId = id;
+          },
+          setMode: (mode) => {
+            currentMode = mode;
+          },
+          lastUserPromptRef,
+          lastAssistantRef,
+        });
+        if (handled) {
+          continue;
+        }
+
+        const shortcutResult = await handleHiveShortcut(prompt, {
+          allowInteractiveConfig: true,
+        });
+        if (shortcutResult === "handled") {
+          continue;
+        }
+        if (shortcutResult === "config-updated") {
+          const latestProfile = getPrimaryAgent(db);
+          if (!latestProfile) {
+            renderError("Hive is not initialized. Run `hive init` first.");
+            continue;
+          }
+
+          activeProfile = latestProfile;
+          provider = await createProvider(activeProfile.provider);
+          agent = new HiveAgent(db, provider, activeProfile);
+          agentName = resolveAgentName(activeProfile.agent_name);
+          if (!options.model) {
+            runOptions.model = activeProfile.model;
+          }
+
           conversationId = undefined;
-          currentMode = "default";
-          lastUserPromptRef.value = null;
-          lastAssistantRef.value = "";
+          renderInfo(
+            `Switched to ${activeProfile.provider} · ${runOptions.model ?? activeProfile.model}.`,
+          );
           renderInfo("Started a new conversation context.");
           continue;
         }
 
-        try {
-          const handled = await handleChatSlashCommand({
-            prompt,
-            db,
-            agent,
-            provider,
-            agentName,
-            conversationId,
-            activeProfilePersona: activeProfile.persona,
-            mode: currentMode,
-            providerName: activeProfile.provider,
-            modelName: runOptions.model ?? activeProfile.model,
-            setConversationId: (id) => {
-              conversationId = id;
-            },
-            setMode: (mode) => {
-              currentMode = mode;
-            },
-            lastUserPromptRef,
-            lastAssistantRef,
-          });
-          if (handled) {
-            continue;
-          }
-
-          const shortcutResult = await handleHiveShortcut(prompt, {
-            allowInteractiveConfig: true,
-          });
-          if (shortcutResult === "handled") {
-            continue;
-          }
-          if (shortcutResult === "config-updated") {
-            const latestProfile = getPrimaryAgent(db);
-            if (!latestProfile) {
-              renderError("Hive is not initialized. Run `hive init` first.");
-              continue;
-            }
-
-            activeProfile = latestProfile;
-            provider = await createProvider(activeProfile.provider);
-            agent = new HiveAgent(db, provider, activeProfile);
-            agentName = resolveAgentName(activeProfile.agent_name);
-            if (!options.model) {
-              runOptions.model = activeProfile.model;
-            }
-
-            conversationId = undefined;
-            renderInfo(
-              `Switched to ${activeProfile.provider} · ${runOptions.model ?? activeProfile.model}.`,
-            );
-            renderInfo("Started a new conversation context.");
-            continue;
-          }
-
-          if (isUnknownSlashCommand(prompt)) {
-            renderError("✗ Unknown command. Type /help for available commands.");
-            continue;
-          }
-
-          const augmentedPrompt = await buildBrowserAugmentedPrompt(prompt, {
-            locationHint: profile.location ?? undefined,
-          });
-          lastUserPromptRef.value = prompt;
-          const memoryAddition = buildMemoryAddition(db, prompt);
-          const systemAddition = combineSystemAdditions([
-            getModeSystemPrompt(currentMode),
-            memoryAddition,
-          ]);
-
-          const streamResult = await streamReply(
-            agent,
-            augmentedPrompt,
-            conversationId,
-            runOptions,
-            agentName,
-            systemAddition,
-          );
-          conversationId = streamResult.conversationId;
-          lastAssistantRef.value = streamResult.assistantText;
-          saveEpisodeSummary(db, prompt, streamResult.assistantText);
-        } catch (error) {
-          renderError(formatError(error));
+        if (isUnknownSlashCommand(prompt)) {
+          renderError("✗ Unknown command. Type /help for available commands.");
+          continue;
         }
+
+        const augmentedPrompt = await buildBrowserAugmentedPrompt(prompt, {
+          locationHint: profile.location ?? undefined,
+        });
+        lastUserPromptRef.value = prompt;
+        const systemAddition = getModeSystemPrompt(currentMode);
+
+        const streamResult = await streamReply(
+          agent,
+          augmentedPrompt,
+          conversationId,
+          runOptions,
+          agentName,
+          systemAddition,
+        );
+        conversationId = streamResult.conversationId;
+        lastAssistantRef.value = streamResult.assistantText;
+      } catch (error) {
+        renderError(formatError(error));
       }
+    }
   } finally {
     closeHiveDatabase(db);
   }
@@ -1088,11 +1075,7 @@ async function handleChatSlashCommand(input: {
       return true;
     }
 
-    const memoryAddition = buildMemoryAddition(input.db, userPrompt);
-    const systemAddition = combineSystemAdditions([
-      getModeSystemPrompt(input.mode),
-      memoryAddition,
-    ]);
+    const systemAddition = getModeSystemPrompt(input.mode);
 
     const retryResult = await streamReply(
       input.agent,
@@ -1104,7 +1087,6 @@ async function handleChatSlashCommand(input: {
     );
     input.setConversationId(retryResult.conversationId);
     input.lastAssistantRef.value = retryResult.assistantText;
-    saveEpisodeSummary(input.db, userPrompt, retryResult.assistantText);
     return true;
   }
 
@@ -1126,35 +1108,7 @@ async function handleChatSlashCommand(input: {
   return false;
 }
 
-function buildMemoryAddition(db: HiveDatabase, userPrompt: string): string | undefined {
-  const pinned = listPinnedKnowledge(db);
-  const relevantEpisodes = findRelevantEpisodes(db, userPrompt, 3);
 
-  const sections: string[] = [];
-
-  if (pinned.length > 0) {
-    sections.push(
-      "Pinned knowledge:",
-      ...pinned.map((item) => `- ${item.content}`),
-    );
-  }
-
-  if (relevantEpisodes.length > 0) {
-    sections.push(
-      "Relevant memories:",
-      ...relevantEpisodes.map((item) => `- ${item.episode.content}`),
-    );
-  }
-
-  const combined = sections.join("\n");
-  return combined.length > 0 ? combined : undefined;
-}
-
-function saveEpisodeSummary(db: HiveDatabase, userPrompt: string, assistantText: string): void {
-  const summary = `User: ${userPrompt}\nHive: ${assistantText}`;
-  const trimmed = summary.length > 2000 ? `${summary.slice(0, 2000)}…` : summary;
-  insertEpisode(db, trimmed);
-}
 
 function copyToClipboard(text: string): boolean {
   const platform = process.platform;

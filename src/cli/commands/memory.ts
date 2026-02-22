@@ -6,6 +6,7 @@ import { Command } from "commander";
 import {
   clearEpisodes,
   getPrimaryAgent,
+  insertKnowledge,
   listKnowledge,
   openHiveDatabase,
   closeHiveDatabase,
@@ -71,6 +72,32 @@ export function registerMemoryCommand(program: Command): void {
 
         renderHiveHeader("Persona");
         renderInfo(agent.persona);
+      } finally {
+        closeHiveDatabase(db);
+      }
+    });
+
+  memory
+    .command("add <fact>")
+    .description("add a fact to the knowledge graph")
+    .action(async (fact: string) => {
+      const db = openHiveDatabase();
+      try {
+        insertKnowledge(db, { content: fact });
+        renderSuccess("✓ Added.");
+      } finally {
+        closeHiveDatabase(db);
+      }
+    });
+
+  memory
+    .command("pin <fact>")
+    .description("add and pin a fact to the knowledge graph")
+    .action(async (fact: string) => {
+      const db = openHiveDatabase();
+      try {
+        insertKnowledge(db, { content: fact, pinned: true });
+        renderSuccess("✓ Pinned.");
       } finally {
         closeHiveDatabase(db);
       }

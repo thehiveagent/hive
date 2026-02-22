@@ -42,7 +42,7 @@ export class OpenAICompatibleProvider implements Provider {
   async *streamChat(request: StreamChatRequest): AsyncGenerator<string> {
     if (!this.allowMissingApiKey && !this.apiKey) {
       throw new ProviderConfigurationError(
-        `Provider \"${this.name}\" is missing an API key.`,
+        `Provider "${this.name}" is missing an API key.`,
       );
     }
 
@@ -62,7 +62,7 @@ export class OpenAICompatibleProvider implements Provider {
   async completeChat(request: CompleteChatRequest): Promise<CompleteChatResponse> {
     if (!this.allowMissingApiKey && !this.apiKey) {
       throw new ProviderConfigurationError(
-        `Provider \"${this.name}\" is missing an API key.`,
+        `Provider "${this.name}" is missing an API key.`,
       );
     }
 

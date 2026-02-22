@@ -110,7 +110,7 @@ export function normalizeProviderName(raw?: string): ProviderName {
   }
 
   throw new ProviderConfigurationError(
-    `Unsupported provider \"${raw}\". Supported providers: ${SUPPORTED_PROVIDER_NAMES.join(", ")}.`,
+    `Unsupported provider "${raw}". Supported providers: ${SUPPORTED_PROVIDER_NAMES.join(", ")}.`,
   );
 }
 
