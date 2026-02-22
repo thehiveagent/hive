@@ -587,7 +587,7 @@ function isHiveShortcut(prompt: string): boolean {
 }
 
 function getModeSystemPrompt(mode: ModeName): string | undefined {
-  return MODE_PROMPTS[mode] ?? undefined ?? undefined;
+  return MODE_PROMPTS[mode] ?? undefined;
 }
 
 function isUnknownSlashCommand(prompt: string): boolean {
