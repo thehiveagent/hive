@@ -99,3 +99,30 @@ npm install -g @imisbahk/hive@0.1.2
 ```bash
 npm install -g @imisbahk/hive@0.1.3
 ```
+
+## 🐝 v0.1.4 — Memory + Update Awareness
+
+### What's in v0.1.4
+
+- Memory actually shapes replies: every chat turn injects pinned facts plus top 3 relevant episodic memories, and saves a new episode summary after each exchange.
+- New in-chat commands:
+  - `/recap` — summarize persona + knowledge graph
+  - `/save <title>` — set conversation title
+  - `/pin <fact>` — pin facts that always enter context
+  - `/status` — show mode/provider/model/conversation id
+  - `/retry` — resend last user message
+  - `/copy` — copy last reply to clipboard
+- New CLI command group: `hive memory`
+  - `hive memory list` — list knowledge (pinned flagged)
+  - `hive memory clear` — wipe episodic memory (with confirmation)
+  - `hive memory show` — print current persona
+- Auto-update check on chat start: warns when a newer npm release is available (3s timeout; non-blocking).
+- `/hive memory ...` shortcuts available directly inside chat.
+- Help/menu surfaces now include every chat and memory command.
+- `/exit` handling normalized so it exits immediately even with stray spaces/case.
+
+### Upgrade
+
+```bash
+npm install -g @imisbahk/hive@0.1.4
+```

@@ -18,7 +18,7 @@ const program = new Command();
 program
   .name("hive")
   .description("Your agent. Always running. Always learning. Always working.")
-  .version("0.1.1");
+  .version("0.1.4");
 
 registerInitCommand(program);
 registerChatCommand(program);

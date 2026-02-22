@@ -86,6 +86,22 @@ Example:
 hive doctor
 ```
 
+### `hive memory`
+
+Manage stored knowledge and episodic memory without leaving the CLI.
+
+Subcommands:
+- `hive memory list`: show all knowledge graph entries (pinned marked)
+- `hive memory clear`: delete all episodic memories (prompts for confirmation)
+- `hive memory show`: print the current persona
+
+Examples:
+```bash
+hive memory list
+hive memory clear
+hive memory show
+```
+
 ### `hive nuke`
 
 Irreversibly deletes your local Hive data (`~/.hive/`) and attempts to delete API keys stored in your OS keychain under the `hive` service.
@@ -104,12 +120,16 @@ These commands are available inside the interactive chat UI (`hive`).
 - `/` or `/help`: show chat commands
 - `/new`: start a new conversation context (resets the active conversation id)
 - `/exit` or `/quit`: quit chat
+- `/clear`: clear the terminal while staying in the same conversation
+- `/status`: print mode, provider, model, and conversation id inline
 
 Examples:
 ```text
 /help
 /new
 /exit
+/status
+/clear
 ```
 
 ### Web commands
@@ -120,6 +140,7 @@ Hive supports web browsing and search via Playwright-backed helpers.
 - `browse <url>`: same as `/browse`
 - `/search <query>`: search the web and inject results into the prompt as *untrusted context*
 - `search <query>`: same as `/search`
+- `/summarize <url>`: open a page and stream a concise summary back
 
 Examples:
 ```text
@@ -128,6 +149,7 @@ Examples:
 
 /search best budget mechanical keyboard
 search postgres jsonb indexing tips
+/summarize https://example.com
 ```
 
 ### Hive shortcuts (`/hive ...`)
@@ -142,6 +164,9 @@ Supported shortcuts:
 - `/hive config model`: interactive model setup (in-chat)
 - `/hive config key`: interactive key setup (in-chat)
 - `/hive config theme`: interactive theme setup (in-chat)
+- `/hive memory list`: list knowledge entries
+- `/hive memory clear`: clear episodic memory (prompts)
+- `/hive memory show`: show current persona
 - `/hive init`: prints instructions to run `hive init` from your shell (interactive)
 - `/hive nuke`: prints instructions to run `hive nuke` from your shell (interactive)
 
@@ -150,23 +175,30 @@ Examples:
 /hive status
 /hive config show
 /hive config provider
+/hive memory list
 ```
 
-### Reserved / referenced in `CHANGELOG.md` (not implemented in this repo yet)
+### Memory and summaries
 
-The following slash commands are referenced in the `v0.1.2` changelog entry, but are not present in the current source tree. In chat today, they will be rejected as unknown commands:
-- `/remember`
-- `/forget`
-- `/tldr`
-- `/mode`
-- `/export`
-- `/history`
-- `/think`
-- `/clear`
+- `/remember <fact>`: save a fact to the knowledge graph
+- `/pin <fact>`: save a pinned fact that always enters context
+- `/forget <thing>`: delete the closest matching fact (with confirmation)
+- `/tldr`: summarize the current conversation (3–5 bullets)
+- `/recap`: summarize everything known about you (persona + knowledge)
+- `/mode <default|research|code|brainstorm|brief>`: switch response style
+- `/save <title>`: set the current conversation title
+- `/history`: list recent conversations and resume one
+- `/export`: export the current conversation to `~/.hive/exports/<id>.md`
+- `/retry`: resend the last user message
+- `/copy`: copy last assistant reply to clipboard (pbcopy/xclip fallback)
+- `/think <question>`: request chain-of-thought reasoning inline
 
-Example (current behavior):
+Example:
 ```text
-/remember this
-Unknown command: /remember this
+/remember Loves Ethiopian pour-over
+/pin Lives in Seattle
+/tldr
+/recap
+/mode brief
+/retry
 ```
-
