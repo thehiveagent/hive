@@ -16,6 +16,10 @@ import {
   HiveAgent,
 } from "../../agent/agent.js";
 import {
+  initializeHiveCtxSession,
+  type HiveCtxSession,
+} from "../../agent/hive-ctx.js";
+import {
   closeHiveDatabase,
   deleteKnowledge,
   findClosestKnowledge,
@@ -23,8 +27,6 @@ import {
   getPrimaryAgent,
   getHiveHomeDir,
   insertKnowledge,
-  insertEpisode,
-  listPinnedKnowledge,
   listKnowledge,
   type KnowledgeRecord,
   type MessageRecord,
@@ -33,7 +35,6 @@ import {
   openHiveDatabase,
   updateConversationTitle,
   clearEpisodes,
-  findRelevantEpisodes,
 } from "../../storage/db.js";
 import { createProvider, pingProvider } from "../../providers/index.js";
 import {
@@ -363,11 +364,22 @@ export async function runChatCommand(
     }
 
     let activeProfile = profile;
+    const model = options.model ?? activeProfile.model;
+    const ctxStoragePath = join(getHiveHomeDir(), "ctx");
+    mkdirSync(ctxStoragePath, { recursive: true });
+    let hiveCtx = await initializeHiveCtxSession({
+      storagePath: ctxStoragePath,
+      profile: activeProfile,
+      model,
+    });
+    if (hiveCtx.warning) {
+      console.log(chalk.dim(hiveCtx.warning));
+    }
+
     let provider = await createProvider(activeProfile.provider);
     let agent = new HiveAgent(db, provider, activeProfile);
     let agentName = resolveAgentName(activeProfile.agent_name);
     let currentMode: ModeName = "default";
-    const model = options.model ?? activeProfile.model;
 
     try {
       await pingProvider(provider, model);
@@ -393,18 +405,20 @@ export async function runChatCommand(
 
     if (options.message) {
       const augmentedMessage = await buildBrowserAugmentedPrompt(options.message, {
-        locationHint: profile.location ?? undefined,
+        locationHint: activeProfile.location ?? undefined,
       });
       const systemAddition = getModeSystemPrompt(currentMode);
       lastUserPromptRef.value = options.message;
-      const streamResult = await streamReply(
+      const streamResult = await streamReply({
         agent,
-        augmentedMessage,
+        prompt: augmentedMessage,
+        rawPrompt: options.message,
         conversationId,
-        runOptions,
+        options: runOptions,
         agentName,
         systemAddition,
-      );
+        hiveCtx: hiveCtx.session,
+      });
       conversationId = streamResult.conversationId;
       lastAssistantRef.value = streamResult.assistantText;
       renderInfo(`conversation: ${conversationId}`);
@@ -463,15 +477,16 @@ export async function runChatCommand(
           },
           lastUserPromptRef,
           lastAssistantRef,
+          hiveCtx: hiveCtx.session,
         });
         if (handled) {
           continue;
         }
 
-          const shortcutResult = await handleHiveShortcut(prompt, {
-            allowInteractiveConfig: true,
-            db,
-          });
+        const shortcutResult = await handleHiveShortcut(prompt, {
+          allowInteractiveConfig: true,
+          db,
+        });
         if (shortcutResult === "handled") {
           continue;
         }
@@ -483,6 +498,15 @@ export async function runChatCommand(
           }
 
           activeProfile = latestProfile;
+          const resolvedModel = options.model ?? activeProfile.model;
+          hiveCtx = await initializeHiveCtxSession({
+            storagePath: ctxStoragePath,
+            profile: activeProfile,
+            model: resolvedModel,
+          });
+          if (hiveCtx.warning) {
+            console.log(chalk.dim(hiveCtx.warning));
+          }
           provider = await createProvider(activeProfile.provider);
           agent = new HiveAgent(db, provider, activeProfile);
           agentName = resolveAgentName(activeProfile.agent_name);
@@ -511,19 +535,21 @@ export async function runChatCommand(
         }
 
         const augmentedPrompt = await buildBrowserAugmentedPrompt(prompt, {
-          locationHint: profile.location ?? undefined,
+          locationHint: activeProfile.location ?? undefined,
         });
         lastUserPromptRef.value = prompt;
         const systemAddition = getModeSystemPrompt(currentMode);
 
-        const streamResult = await streamReply(
+        const streamResult = await streamReply({
           agent,
-          augmentedPrompt,
+          prompt: augmentedPrompt,
+          rawPrompt: prompt,
           conversationId,
-          runOptions,
+          options: runOptions,
           agentName,
           systemAddition,
-        );
+          hiveCtx: hiveCtx.session,
+        });
         conversationId = streamResult.conversationId;
         lastAssistantRef.value = streamResult.assistantText;
       } catch (error) {
@@ -541,15 +567,19 @@ interface StreamResult {
 }
 
 async function streamReply(
-  agent: HiveAgent,
-  prompt: string,
-  conversationId: string | undefined,
-  options: RunChatOptions,
-  agentName: string,
-  systemAddition?: string,
+  input: {
+    agent: HiveAgent;
+    prompt: string;
+    rawPrompt: string;
+    conversationId: string | undefined;
+    options: RunChatOptions;
+    agentName: string;
+    systemAddition?: string;
+    hiveCtx: HiveCtxSession | null;
+  },
 ): Promise<StreamResult> {
   const theme = getTheme();
-  process.stdout.write(theme.accent(`${agentName}${PROMPT_SYMBOL} `));
+  process.stdout.write(theme.accent(`${input.agentName}${PROMPT_SYMBOL} `));
 
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   let frameIndex = 0;
@@ -561,21 +591,31 @@ async function streamReply(
     readline.cursorTo(stdout, 0);
     readline.clearLine(stdout, 0);
     stdout.write(
-      `${theme.accent(`${agentName}${PROMPT_SYMBOL} `)}${chalk.dim(theme.accent(frames[frameIndex]))} thinking...`,
+      `${theme.accent(`${input.agentName}${PROMPT_SYMBOL} `)}${chalk.dim(theme.accent(frames[frameIndex]))} thinking...`,
     );
     frameIndex = (frameIndex + 1) % frames.length;
   }, 120);
 
-  let activeConversationId = conversationId;
+  let activeConversationId = input.conversationId;
   let assistantText = "";
+  let ctxSystemPrompt: string | undefined;
+  let ctxTokenCount: number | undefined;
+
+  if (input.hiveCtx) {
+    const context = await input.hiveCtx.build(input.rawPrompt);
+    ctxSystemPrompt = context.system;
+    ctxTokenCount = context.tokens;
+  }
 
   try {
-    for await (const event of agent.chat(prompt, {
+    for await (const event of input.agent.chat(input.prompt, {
       conversationId: activeConversationId,
-      model: options.model,
-      temperature: options.temperature,
-      title: options.title,
-      systemAddition,
+      model: input.options.model,
+      temperature: input.options.temperature,
+      title: input.options.title,
+      systemAddition: input.systemAddition,
+      contextSystemPrompt: ctxSystemPrompt,
+      disableLegacyEpisodeStore: Boolean(input.hiveCtx),
     })) {
       if (event.type === "token") {
         if (!firstToken) {
@@ -583,7 +623,7 @@ async function streamReply(
           clearInterval(spinner);
           readline.cursorTo(stdout, 0);
           readline.clearLine(stdout, 0);
-          stdout.write(theme.accent(`${agentName}${PROMPT_SYMBOL} `));
+          stdout.write(theme.accent(`${input.agentName}${PROMPT_SYMBOL} `));
         }
         process.stdout.write(event.token);
         activeConversationId = event.conversationId;
@@ -598,7 +638,7 @@ async function streamReply(
       clearInterval(spinner);
       readline.cursorTo(stdout, 0);
       readline.clearLine(stdout, 0);
-      stdout.write(theme.accent(`${agentName}${PROMPT_SYMBOL} `));
+      stdout.write(theme.accent(`${input.agentName}${PROMPT_SYMBOL} `));
     } else {
       clearInterval(spinner);
     }
@@ -612,6 +652,14 @@ async function streamReply(
 
   process.stdout.write("\n");
   renderSeparator(EXCHANGE_SEPARATOR);
+
+  if (input.hiveCtx) {
+    await Promise.resolve(input.hiveCtx.episode(input.rawPrompt, assistantText)).catch(() => {});
+  }
+
+  if (ctxTokenCount !== undefined) {
+    console.log(chalk.dim(`· ~${ctxTokenCount} ctx tokens`));
+  }
 
   if (!activeConversationId) {
     throw new Error("Conversation state was not returned by the agent.");
@@ -962,6 +1010,7 @@ async function handleChatSlashCommand(input: {
   setMode: (mode: ModeName) => void;
   lastUserPromptRef: { value: string | null };
   lastAssistantRef: { value: string };
+  hiveCtx: HiveCtxSession | null;
 }): Promise<boolean> {
   const normalized = input.prompt.trim();
   const lower = normalized.toLowerCase();
@@ -990,7 +1039,11 @@ async function handleChatSlashCommand(input: {
       return true;
     }
 
-    insertKnowledge(input.db, { content: fact });
+    if (input.hiveCtx) {
+      await input.hiveCtx.remember(fact);
+    } else {
+      insertKnowledge(input.db, { content: fact });
+    }
     renderSuccess("✓ Remembered.");
     input.lastUserPromptRef.value = null;
     return true;
@@ -1041,7 +1094,11 @@ async function handleChatSlashCommand(input: {
       return true;
     }
 
-    insertKnowledge(input.db, { content: fact, pinned: true });
+    if (input.hiveCtx) {
+      await input.hiveCtx.remember(fact, { pinned: true });
+    } else {
+      insertKnowledge(input.db, { content: fact, pinned: true });
+    }
     renderSuccess("✓ Pinned.");
     input.lastUserPromptRef.value = null;
     return true;
@@ -1220,14 +1277,16 @@ async function handleChatSlashCommand(input: {
 
     const systemAddition = getModeSystemPrompt(input.mode);
 
-    const retryResult = await streamReply(
-      input.agent,
-      userPrompt,
-      input.conversationId,
-      { model: input.modelName },
-      input.agentName,
+    const retryResult = await streamReply({
+      agent: input.agent,
+      prompt: userPrompt,
+      rawPrompt: userPrompt,
+      conversationId: input.conversationId,
+      options: { model: input.modelName },
+      agentName: input.agentName,
       systemAddition,
-    );
+      hiveCtx: input.hiveCtx,
+    });
     input.setConversationId(retryResult.conversationId);
     input.lastAssistantRef.value = retryResult.assistantText;
     return true;
@@ -1250,8 +1309,6 @@ async function handleChatSlashCommand(input: {
 
   return false;
 }
-
-
 
 function copyToClipboard(text: string): boolean {
   const platform = process.platform;

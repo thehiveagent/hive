@@ -37,6 +37,9 @@
             ],
             "@mesh/*": [
                 "./src/mesh/*"
+            ],
+            "@hive-ctx/bindings": [
+                "./hive-ctx/packages/bindings/dist/index.js"
             ]
         }
     },

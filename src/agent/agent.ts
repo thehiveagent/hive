@@ -8,9 +8,11 @@ import {
   appendMessage,
   createConversation,
   getConversationById,
+  getMetaValue,
   getPrimaryAgent,
   insertEpisode,
   listMessages,
+  setMetaValue,
 } from "../storage/db.js";
 import {
   chunkText,
@@ -74,6 +76,8 @@ export interface AgentChatOptions {
   temperature?: number;
   maxTokens?: number;
   systemAddition?: string;
+  contextSystemPrompt?: string;
+  disableLegacyEpisodeStore?: boolean;
 }
 
 export interface PromptContext {
@@ -140,12 +144,20 @@ export class HiveAgent {
     });
 
     const history = listMessages(this.db, conversation.id, this.historyLimit);
-    const promptContext = buildPromptContext({
-      agent: this.agent,
-      db: this.db,
-      userPrompt: trimmed,
-      modeAddition: options.systemAddition,
-    });
+    const contextSystemPrompt = options.contextSystemPrompt?.trim();
+    const systemMessages = contextSystemPrompt && contextSystemPrompt.length > 0
+      ? [
+        {
+          role: "system" as const,
+          content: mergeSystemPrompts([contextSystemPrompt, options.systemAddition]),
+        },
+      ]
+      : buildPromptContext({
+        agent: this.agent,
+        db: this.db,
+        userPrompt: trimmed,
+        modeAddition: options.systemAddition,
+      }).systemMessages;
 
     const providerRequest: StreamChatRequest = {
       model: options.model ?? this.agent.model,
@@ -156,7 +168,7 @@ export class HiveAgent {
           role: "system",
           content: RUNTIME_SYSTEM_GUARDRAILS,
         },
-        ...promptContext.systemMessages,
+        ...systemMessages,
         ...history.map((message) => ({
           role: message.role,
           content: message.content,
@@ -187,7 +199,9 @@ export class HiveAgent {
           content: assistantText,
         });
 
-        this.saveEpisodeSummary(trimmed, assistantText);
+        if (!options.disableLegacyEpisodeStore) {
+          this.saveEpisodeSummary(trimmed, assistantText);
+        }
 
         yield {
           type: "done",
@@ -206,7 +220,9 @@ export class HiveAgent {
       content: assistantText,
     });
 
-    this.saveEpisodeSummary(trimmed, assistantText);
+    if (!options.disableLegacyEpisodeStore) {
+      this.saveEpisodeSummary(trimmed, assistantText);
+    }
 
     yield {
       type: "done",
@@ -383,6 +399,13 @@ export class HiveAgent {
 
     return toolMessages;
   }
+}
+
+function mergeSystemPrompts(parts: Array<string | undefined>): string {
+  return parts
+    .map((part) => part?.trim() ?? "")
+    .filter((part) => part.length > 0)
+    .join("\n\n");
 }
 
 export function buildDefaultPersona(ownerName: string, agentName?: string): string {
