@@ -8,7 +8,7 @@ export interface SchemaMigration {
   sql: string;
 }
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 const initialSchemaSql = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -89,6 +89,21 @@ CREATE TABLE IF NOT EXISTS knowledge (
 CREATE INDEX IF NOT EXISTS idx_knowledge_created_at ON knowledge(created_at);
 `,
   },
+  {
+    version: 4,
+    name: "v4_episodes_and_pinned_knowledge",
+    sql: `
+CREATE TABLE IF NOT EXISTS episodes (
+  id TEXT PRIMARY KEY,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_episodes_created_at ON episodes(created_at);
+
+ALTER TABLE knowledge ADD COLUMN pinned INTEGER DEFAULT 0;
+`,
+  },
 ];
 
 export interface MetaRecord {
@@ -129,6 +144,13 @@ export interface MessageRecord {
 }
 
 export interface KnowledgeRecord {
+  id: string;
+  content: string;
+  created_at: string;
+  pinned?: number | boolean;
+}
+
+export interface EpisodeRecord {
   id: string;
   content: string;
   created_at: string;

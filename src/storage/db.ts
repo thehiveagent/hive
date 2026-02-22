@@ -10,6 +10,7 @@ import {
   MIGRATIONS,
   type AgentRecord,
   type ConversationRecord,
+  type EpisodeRecord,
   type KnowledgeRecord,
   type MessageRecord,
   type MessageRole,
@@ -20,6 +21,7 @@ export type HiveDatabase = Database.Database;
 export type {
   AgentRecord,
   ConversationRecord,
+  EpisodeRecord,
   KnowledgeRecord,
   MessageRecord,
   MessageRole,
@@ -51,6 +53,7 @@ export interface AppendMessageInput {
 
 export interface InsertKnowledgeInput {
   content: string;
+  pinned?: boolean;
 }
 
 export interface ListKnowledgeOptions {
@@ -67,6 +70,11 @@ export interface ConversationSummary {
   title: string | null;
   updated_at: string;
   message_count: number;
+}
+
+export interface RelevantEpisode {
+  episode: EpisodeRecord;
+  score: number;
 }
 
 export const HIVE_DIRECTORY_NAME = ".hive";
@@ -399,6 +407,34 @@ export function createConversation(
   };
 }
 
+export function updateConversationTitle(
+  db: HiveDatabase,
+  conversationId: string,
+  title: string,
+): ConversationRecord {
+  const existing = getConversationById(db, conversationId);
+  if (!existing) {
+    throw new Error(`Conversation "${conversationId}" was not found.`);
+  }
+
+  const trimmed = title.trim();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+    UPDATE conversations
+    SET title = ?, updated_at = ?
+    WHERE id = ?
+  `,
+  ).run(trimmed, timestamp, conversationId);
+
+  return {
+    ...existing,
+    title: trimmed,
+    updated_at: timestamp,
+  };
+}
+
 export function getConversationById(
   db: HiveDatabase,
   conversationId: string,
@@ -533,18 +569,20 @@ export function listRecentConversations(
 export function insertKnowledge(db: HiveDatabase, input: InsertKnowledgeInput): KnowledgeRecord {
   const id = uuidv4();
   const timestamp = nowIso();
+  const pinnedValue = input.pinned ? 1 : 0;
 
   db.prepare(
     `
-    INSERT INTO knowledge (id, content, created_at)
-    VALUES (?, ?, ?)
+    INSERT INTO knowledge (id, content, created_at, pinned)
+    VALUES (?, ?, ?, ?)
   `,
-  ).run(id, input.content.trim(), timestamp);
+  ).run(id, input.content.trim(), timestamp, pinnedValue);
 
   return {
     id,
     content: input.content.trim(),
     created_at: timestamp,
+    pinned: pinnedValue,
   };
 }
 
@@ -556,7 +594,7 @@ export function listKnowledge(
   return db
     .prepare(
       `
-      SELECT id, content, created_at
+      SELECT id, content, created_at, pinned
       FROM knowledge
       ORDER BY datetime(created_at) DESC
       LIMIT ?
@@ -578,6 +616,7 @@ export function findClosestKnowledge(db: HiveDatabase, query: string): Knowledge
         id,
         content,
         created_at,
+        pinned,
         CASE WHEN content LIKE ? THEN 0 ELSE 1 END AS mismatch,
         ABS(LENGTH(content) - ?) AS length_diff
       FROM knowledge
@@ -597,6 +636,7 @@ export function findClosestKnowledge(db: HiveDatabase, query: string): Knowledge
     id: row.id,
     content: row.content,
     created_at: row.created_at,
+    pinned: row.pinned,
   };
 }
 
