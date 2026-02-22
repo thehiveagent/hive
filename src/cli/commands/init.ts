@@ -24,6 +24,8 @@ import {
   upsertPrimaryAgent,
 } from "../../storage/db.js";
 import type { ProviderName } from "../../providers/base.js";
+import { createProviderWithKey, pingProvider } from "../../providers/index.js";
+import { delay } from "../../providers/resilience.js";
 
 interface InitAnswers {
   name: string;
@@ -82,38 +84,47 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
       }
     }
 
-    const answers = await askInitQuestions();
-    spinner.start("Initializing...");
+    while (true) {
+      const answers = await askInitQuestions();
+      const confirmed = await confirmInitDetails(answers);
+      if (!confirmed) {
+        renderInfo("Restarting init...");
+        continue;
+      }
 
-    if (answers.provider !== "ollama" && answers.apiKey) {
-      await keytar.setPassword(KEYCHAIN_SERVICE, answers.provider, answers.apiKey);
+      const apiKey = await verifyApiKeyLoop(answers.provider, answers.model, answers.apiKey);
+
+      spinner.start("Initializing...");
+
+      if (answers.provider !== "ollama" && apiKey) {
+        await keytar.setPassword(KEYCHAIN_SERVICE, answers.provider, apiKey);
+      }
+
+      const agent = upsertPrimaryAgent(db, {
+        name: answers.name,
+        provider: answers.provider,
+        model: answers.model,
+        persona: buildDefaultPersona(answers.name, answers.agentName ?? undefined),
+        dob: answers.dob,
+        location: answers.location,
+        profession: answers.profession,
+        aboutRaw: answers.aboutRaw,
+        agentName: answers.agentName ?? null,
+      });
+
+      setMetaValue(db, "initialized_at", new Date().toISOString());
+      setMetaValue(db, "provider", agent.provider);
+      setMetaValue(db, "model", agent.model);
+      copyPromptsDirectory(options.force ?? false);
+
+      spinner.stop();
+      await animateHiveId(agent.id);
+      renderSuccess(`Agent name: ${agent.agent_name ?? "hive"}`);
+      renderSuccess(`Provider: ${agent.provider}`);
+      renderSuccess(`Model: ${agent.model}`);
+      renderStep("Run `hive` to start talking.");
+      break;
     }
-
-    const agent = upsertPrimaryAgent(db, {
-      name: answers.name,
-      provider: answers.provider,
-      model: answers.model,
-      persona: buildDefaultPersona(answers.name),
-      dob: answers.dob,
-      location: answers.location,
-      profession: answers.profession,
-      aboutRaw: answers.aboutRaw,
-      agentName: answers.agentName ?? null,
-    });
-
-    setMetaValue(db, "initialized_at", new Date().toISOString());
-    setMetaValue(db, "provider", agent.provider);
-    setMetaValue(db, "model", agent.model);
-    copyPromptsDirectory(options.force ?? false);
-
-    spinner.succeed("Initialization complete.");
-    renderSuccess(`HIVE-ID: ${agent.id}`);
-    if (agent.agent_name) {
-      renderSuccess(`Agent name: ${agent.agent_name}`);
-    }
-    renderSuccess(`Provider: ${agent.provider}`);
-    renderSuccess(`Model: ${agent.model}`);
-    renderStep("Run `hive` to start talking.");
   } catch (error) {
     if (spinner.isSpinning) {
       spinner.fail("Hive initialization failed.");
@@ -224,6 +235,74 @@ function requiredField(message: string): (value: string) => true | string {
 function normalizeOptional(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+async function confirmInitDetails(answers: InitAnswers): Promise<boolean> {
+  console.log("");
+  console.log("  ◆ Review your details");
+  console.log("");
+  console.log(`  Name:        ${answers.name}`);
+  console.log(`  DOB:         ${answers.dob}`);
+  console.log(`  Location:    ${answers.location}`);
+  console.log(`  Profession:  ${answers.profession}`);
+  console.log(`  Provider:    ${answers.provider}`);
+  console.log(`  Model:       ${answers.model}`);
+  console.log(`  Agent name:  ${answers.agentName ?? "hive"}`);
+  console.log("");
+
+  const { confirm } = (await inquirer.prompt([
+    {
+      type: "confirm",
+      name: "confirm",
+      message: "Confirm? (y/n)",
+      default: true,
+    },
+  ])) as { confirm: boolean };
+
+  return confirm;
+}
+
+async function verifyApiKeyLoop(
+  provider: ProviderName,
+  model: string,
+  apiKey?: string,
+): Promise<string | undefined> {
+  if (provider === "ollama") {
+    return undefined;
+  }
+
+  let currentKey = apiKey;
+
+  while (true) {
+    try {
+      const probeProvider = await createProviderWithKey(provider, currentKey);
+      await pingProvider(probeProvider, model);
+      return currentKey;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to verify API key.";
+      renderInfo(`API key check failed: ${message}`);
+      const answer = (await inquirer.prompt([
+        {
+          type: "password",
+          name: "apiKey",
+          message: "Re-enter your API key:",
+          mask: "*",
+          validate: requiredField("API key is required."),
+        },
+      ])) as { apiKey: string };
+      currentKey = answer.apiKey.trim();
+    }
+  }
+}
+
+async function animateHiveId(id: string): Promise<void> {
+  process.stdout.write("HIVE-ID: ");
+  for (const char of id) {
+    process.stdout.write(char);
+    await delay(20);
+  }
+  process.stdout.write("\n");
 }
 
 function copyPromptsDirectory(force: boolean): void {

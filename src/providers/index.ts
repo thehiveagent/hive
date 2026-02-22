@@ -3,14 +3,15 @@ import {
   type Provider,
   type ProviderName,
 } from "./base.js";
-import { createAnthropicProvider } from "./anthropic.js";
-import { createGoogleProvider } from "./google.js";
-import { createGroqProvider } from "./groq.js";
-import { createMistralProvider } from "./mistral.js";
-import { createOllamaProvider } from "./ollama.js";
-import { createOpenAIProvider } from "./openai.js";
-import { createOpenRouterProvider } from "./openrouter.js";
-import { createTogetherProvider } from "./together.js";
+import { AnthropicProvider, createAnthropicProvider } from "./anthropic.js";
+import { GoogleProvider, createGoogleProvider } from "./google.js";
+import { GroqProvider, createGroqProvider } from "./groq.js";
+import { MistralProvider, createMistralProvider } from "./mistral.js";
+import { OllamaProvider, createOllamaProvider } from "./ollama.js";
+import { OpenAIProvider, createOpenAIProvider } from "./openai.js";
+import { OpenRouterProvider, createOpenRouterProvider } from "./openrouter.js";
+import { TogetherProvider, createTogetherProvider } from "./together.js";
+import { withFirstTokenTimeout } from "./resilience.js";
 
 export async function createProvider(name?: string): Promise<Provider> {
   const resolvedName = normalizeProviderName(name ?? process.env.HIVE_PROVIDER);
@@ -35,6 +36,48 @@ export async function createProvider(name?: string): Promise<Provider> {
     default:
       return assertNever(resolvedName);
   }
+}
+
+export async function createProviderWithKey(
+  name: string,
+  apiKey?: string,
+): Promise<Provider> {
+  const resolvedName = normalizeProviderName(name);
+
+  switch (resolvedName) {
+    case "openai":
+      return new OpenAIProvider(apiKey);
+    case "anthropic":
+      return new AnthropicProvider(apiKey);
+    case "ollama":
+      return new OllamaProvider(apiKey);
+    case "groq":
+      return new GroqProvider(apiKey);
+    case "mistral":
+      return new MistralProvider(apiKey);
+    case "google":
+      return new GoogleProvider(apiKey);
+    case "openrouter":
+      return new OpenRouterProvider(apiKey);
+    case "together":
+      return new TogetherProvider(apiKey);
+    default:
+      return assertNever(resolvedName);
+  }
+}
+
+export async function pingProvider(provider: Provider, model?: string): Promise<void> {
+  const stream = withFirstTokenTimeout(
+    provider.streamChat({
+      model: model ?? provider.defaultModel,
+      messages: [{ role: "user", content: "ping" }],
+      maxTokens: 1,
+    }),
+    5_000,
+  );
+
+  const iterator = stream[Symbol.asyncIterator]();
+  await iterator.next();
 }
 
 export function getDefaultModelForProvider(name: ProviderName): string {

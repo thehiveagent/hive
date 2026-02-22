@@ -35,7 +35,7 @@ import {
   clearEpisodes,
   findRelevantEpisodes,
 } from "../../storage/db.js";
-import { createProvider } from "../../providers/index.js";
+import { createProvider, pingProvider } from "../../providers/index.js";
 import {
   renderError,
   renderHiveHeader,
@@ -369,6 +369,13 @@ export async function runChatCommand(
     let currentMode: ModeName = "default";
     const model = options.model ?? activeProfile.model;
 
+    try {
+      await pingProvider(provider, model);
+    } catch {
+      renderError("✗ Provider unreachable. Run `hive doctor` to diagnose.");
+      return;
+    }
+
     let conversationId = options.conversation;
     const runOptions: RunChatOptions = {
       model,
@@ -483,6 +490,13 @@ export async function runChatCommand(
             runOptions.model = activeProfile.model;
           }
 
+          try {
+            await pingProvider(provider, runOptions.model ?? activeProfile.model);
+          } catch {
+            renderError("✗ Provider unreachable. Run `hive doctor` to diagnose.");
+            continue;
+          }
+
           conversationId = undefined;
           renderInfo(
             `Switched to ${activeProfile.provider} · ${runOptions.model ?? activeProfile.model}.`,
@@ -513,7 +527,7 @@ export async function runChatCommand(
         conversationId = streamResult.conversationId;
         lastAssistantRef.value = streamResult.assistantText;
       } catch (error) {
-        renderError(formatError(error));
+        renderAmberError(formatError(error));
       }
     }
   } finally {
@@ -534,26 +548,66 @@ async function streamReply(
   agentName: string,
   systemAddition?: string,
 ): Promise<StreamResult> {
-  process.stdout.write(getTheme().accent(`${agentName}${PROMPT_SYMBOL} `));
+  const theme = getTheme();
+  process.stdout.write(theme.accent(`${agentName}${PROMPT_SYMBOL} `));
+
+  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  let frameIndex = 0;
+  let firstToken = false;
+  const spinner = setInterval(() => {
+    if (firstToken) {
+      return;
+    }
+    readline.cursorTo(stdout, 0);
+    readline.clearLine(stdout, 0);
+    stdout.write(
+      `${theme.accent(`${agentName}${PROMPT_SYMBOL} `)}${chalk.dim(theme.accent(frames[frameIndex]))} thinking...`,
+    );
+    frameIndex = (frameIndex + 1) % frames.length;
+  }, 120);
 
   let activeConversationId = conversationId;
   let assistantText = "";
 
-  for await (const event of agent.chat(prompt, {
-    conversationId: activeConversationId,
-    model: options.model,
-    temperature: options.temperature,
-    title: options.title,
-    systemAddition,
-  })) {
-    if (event.type === "token") {
-      process.stdout.write(event.token);
-      activeConversationId = event.conversationId;
-      assistantText += event.token;
-      continue;
-    }
+  try {
+    for await (const event of agent.chat(prompt, {
+      conversationId: activeConversationId,
+      model: options.model,
+      temperature: options.temperature,
+      title: options.title,
+      systemAddition,
+    })) {
+      if (event.type === "token") {
+        if (!firstToken) {
+          firstToken = true;
+          clearInterval(spinner);
+          readline.cursorTo(stdout, 0);
+          readline.clearLine(stdout, 0);
+          stdout.write(theme.accent(`${agentName}${PROMPT_SYMBOL} `));
+        }
+        process.stdout.write(event.token);
+        activeConversationId = event.conversationId;
+        assistantText += event.token;
+        continue;
+      }
 
-    activeConversationId = event.conversationId;
+      activeConversationId = event.conversationId;
+    }
+  } finally {
+    if (!firstToken) {
+      clearInterval(spinner);
+      readline.cursorTo(stdout, 0);
+      readline.clearLine(stdout, 0);
+      stdout.write(theme.accent(`${agentName}${PROMPT_SYMBOL} `));
+    } else {
+      clearInterval(spinner);
+    }
+  }
+
+  if (!firstToken) {
+    stdout.write("✗ No response received.\n");
+    renderSeparator(EXCHANGE_SEPARATOR);
+    return { conversationId: activeConversationId ?? "", assistantText };
   }
 
   process.stdout.write("\n");
@@ -585,6 +639,11 @@ function formatError(error: unknown): string {
   }
 
   return String(error);
+}
+
+function renderAmberError(message: string): void {
+  const accent = getTheme().accent;
+  console.error(accent(`✗ ${message}`));
 }
 
 function resolveAgentName(agentName: string | null | undefined): string {
