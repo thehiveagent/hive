@@ -17,11 +17,13 @@ export interface OpenAICompatibleProviderConfig {
   allowMissingApiKey?: boolean;
   extraHeaders?: Record<string, string>;
   extraBody?: Record<string, unknown>;
+  supportsTools?: boolean;
 }
 
 export class OpenAICompatibleProvider implements Provider {
   readonly name: ProviderName;
   readonly defaultModel: string;
+  readonly supportsTools: boolean;
 
   private readonly baseUrl: string;
   private readonly apiKey?: string;
@@ -37,6 +39,7 @@ export class OpenAICompatibleProvider implements Provider {
     this.allowMissingApiKey = config.allowMissingApiKey ?? false;
     this.extraHeaders = config.extraHeaders;
     this.extraBody = config.extraBody;
+    this.supportsTools = config.supportsTools ?? true;
   }
 
   async *streamChat(request: StreamChatRequest): AsyncGenerator<string> {
@@ -74,7 +77,7 @@ export class OpenAICompatibleProvider implements Provider {
       messages: request.messages,
       temperature: request.temperature,
       maxTokens: request.maxTokens,
-      tools: request.tools,
+      tools: this.supportsTools ? request.tools : undefined,
       extraHeaders: this.extraHeaders,
       extraBody: this.extraBody,
     });

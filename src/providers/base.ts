@@ -65,6 +65,7 @@ export interface CompleteChatResponse {
 export interface Provider {
   readonly name: ProviderName;
   readonly defaultModel: string;
+  readonly supportsTools: boolean;
   streamChat(request: StreamChatRequest): AsyncGenerator<string>;
   completeChat?(request: CompleteChatRequest): Promise<CompleteChatResponse>;
 }

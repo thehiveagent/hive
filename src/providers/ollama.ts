@@ -12,6 +12,7 @@ export class OllamaProvider extends OpenAICompatibleProvider {
       apiKey,
       defaultModel: process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL,
       allowMissingApiKey: true,
+      supportsTools: false,
     });
   }
 }

@@ -21,6 +21,7 @@ interface AnthropicMessage {
 export class AnthropicProvider implements Provider {
   readonly name = "anthropic" as const;
   readonly defaultModel: string;
+  readonly supportsTools = true;
 
   private readonly apiKey?: string;
 

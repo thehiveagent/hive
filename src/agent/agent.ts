@@ -14,6 +14,7 @@ import {
 } from "../storage/db.js";
 import {
   chunkText,
+  type CompleteChatRequest,
   type Provider,
   type ProviderMessage,
   type ProviderToolCall,
@@ -275,14 +276,16 @@ export class HiveAgent {
     }));
 
     for (let round = 0; round < MAX_TOOL_CALL_ROUNDS; round += 1) {
+      const requestPayload = {
+        model: providerRequest.model,
+        temperature: providerRequest.temperature,
+        maxTokens: providerRequest.maxTokens,
+        messages,
+        ...(this.provider.supportsTools ? { tools: [WEB_SEARCH_TOOL] } : {}),
+      } as CompleteChatRequest;
+
       const completion = await callWithTransientRetry(() =>
-        completeChat.call(this.provider, {
-          model: providerRequest.model,
-          temperature: providerRequest.temperature,
-          maxTokens: providerRequest.maxTokens,
-          messages,
-          tools: [WEB_SEARCH_TOOL],
-        }),
+        completeChat.call(this.provider, requestPayload),
       );
 
       if (completion.toolCalls.length === 0) {
