@@ -394,21 +394,23 @@ export async function runChatCommand(
         continue;
       }
 
+      const normalizedPrompt = prompt.trim().toLowerCase();
+
       if (prompt === "/") {
         printChatHelp();
         continue;
       }
 
-      if (prompt === "/help") {
+      if (normalizedPrompt === "/help") {
         printChatHelp();
         continue;
       }
 
-      if (prompt === "/exit" || prompt === "/quit") {
+      if (normalizedPrompt === "/exit" || normalizedPrompt === "/quit") {
         break;
       }
 
-        if (prompt === "/new") {
+        if (normalizedPrompt === "/new") {
           conversationId = undefined;
           currentMode = "default";
           lastUserPromptRef.value = null;
