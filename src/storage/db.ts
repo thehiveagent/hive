@@ -643,3 +643,91 @@ export function findClosestKnowledge(db: HiveDatabase, query: string): Knowledge
 export function deleteKnowledge(db: HiveDatabase, id: string): void {
   db.prepare("DELETE FROM knowledge WHERE id = ?").run(id);
 }
+
+export function listPinnedKnowledge(db: HiveDatabase): KnowledgeRecord[] {
+  return db
+    .prepare(
+      `
+      SELECT id, content, created_at, pinned
+      FROM knowledge
+      WHERE pinned = 1
+      ORDER BY datetime(created_at) DESC
+    `,
+    )
+    .all() as KnowledgeRecord[];
+}
+
+export function insertEpisode(db: HiveDatabase, content: string): EpisodeRecord {
+  const id = uuidv4();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+    INSERT INTO episodes (id, content, created_at)
+    VALUES (?, ?, ?)
+  `,
+  ).run(id, content.trim(), timestamp);
+
+  return {
+    id,
+    content: content.trim(),
+    created_at: timestamp,
+  };
+}
+
+export function listEpisodes(db: HiveDatabase, limit = 200): EpisodeRecord[] {
+  return db
+    .prepare(
+      `
+      SELECT id, content, created_at
+      FROM episodes
+      ORDER BY datetime(created_at) DESC
+      LIMIT ?
+    `,
+    )
+    .all(limit) as EpisodeRecord[];
+}
+
+export function findRelevantEpisodes(
+  db: HiveDatabase,
+  query: string,
+  limit = 3,
+): RelevantEpisode[] {
+  const normalized = query.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return [];
+  }
+
+  const terms = Array.from(
+    new Set(
+      normalized
+        .split(/\W+/)
+        .map((term) => term.trim())
+        .filter((term) => term.length >= 4),
+    ),
+  );
+
+  if (terms.length === 0) {
+    return [];
+  }
+
+  const episodes = listEpisodes(db, 200);
+  const scored: RelevantEpisode[] = episodes
+    .map((episode) => {
+      const text = episode.content.toLowerCase();
+      const score = terms.reduce((acc, term) => (text.includes(term) ? acc + 1 : acc), 0);
+      return { episode, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.episode.created_at.localeCompare(a.episode.created_at),
+    );
+
+  return scored.slice(0, limit);
+}
+
+export function clearEpisodes(db: HiveDatabase): void {
+  db.exec("DELETE FROM episodes");
+}

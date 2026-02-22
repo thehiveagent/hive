@@ -8,6 +8,7 @@ import { registerChatCommand, runChatCommand } from "./commands/chat.js";
 import { registerConfigCommand } from "./commands/config.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerInitCommand } from "./commands/init.js";
+import { registerMemoryCommand } from "./commands/memory.js";
 import { registerNukeCommand } from "./commands/nuke.js";
 import { registerStatusCommand } from "./commands/status.js";
 import { renderError, renderHiveHeader } from "./ui.js";
@@ -25,6 +26,7 @@ registerConfigCommand(program);
 registerDoctorCommand(program);
 registerStatusCommand(program);
 registerNukeCommand(program);
+registerMemoryCommand(program);
 
 const argv = process.argv.slice(2);
 

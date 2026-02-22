@@ -1,11 +1,13 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stdin, stdout } from "node:process";
 import * as readline from "node:readline";
 import { createInterface } from "node:readline/promises";
+import { spawnSync } from "node:child_process";
 
 import chalk from "chalk";
 import { Command } from "commander";
+import fetch from "node-fetch";
 import type { Provider, ProviderMessage } from "../../providers/base.js";
 
 import {
@@ -21,10 +23,16 @@ import {
   getPrimaryAgent,
   getHiveHomeDir,
   insertKnowledge,
+  insertEpisode,
+  listPinnedKnowledge,
+  listKnowledge,
+  findRelevantEpisodes,
+  type KnowledgeRecord,
   type MessageRecord,
   listConversationMessages,
   listRecentConversations,
   openHiveDatabase,
+  updateConversationTitle,
 } from "../../storage/db.js";
 import { createProvider } from "../../providers/index.js";
 import {
@@ -84,13 +92,19 @@ const COMMAND_HELP_TEXT = [
   "  /new            start a new conversation",
   "  /remember <fact> save a fact",
   "  /forget <thing>  delete closest fact",
+  "  /pin <fact>      pin fact into context",
   "  /summarize <url> summarize a web page",
   "  /tldr            summarize this conversation",
+  "  /recap           summarize persona + knowledge",
   "  /mode <name>     switch response mode",
+  "  /status          show mode/provider/model",
   "  /export          export conversation markdown",
+  "  /save <title>    name this conversation",
   "  /history         list recent conversations",
   "  /clear           clear the screen",
   "  /think <question>think step by step",
+  "  /retry           resend last message",
+  "  /copy            copy last reply",
   "  /browse <url>   read a webpage",
   "  browse <url>    same as /browse",
   "  /search <query> search the web",
@@ -152,6 +166,11 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
     description: "save to knowledge graph",
   },
   {
+    label: "/pin <fact>",
+    insertText: "/pin ",
+    description: "pin fact into context",
+  },
+  {
     label: "/forget <thing>",
     insertText: "/forget ",
     description: "delete closest fact",
@@ -167,6 +186,11 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
     description: "summarize this conversation",
   },
   {
+    label: "/recap",
+    insertText: "/recap",
+    description: "summarize persona & knowledge",
+  },
+  {
     label: "/mode <name>",
     insertText: "/mode ",
     description: "switch response style",
@@ -177,9 +201,19 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
     description: "export conversation markdown",
   },
   {
+    label: "/save <title>",
+    insertText: "/save ",
+    description: "set conversation title",
+  },
+  {
     label: "/history",
     insertText: "/history",
     description: "list recent conversations",
+  },
+  {
+    label: "/status",
+    insertText: "/status",
+    description: "show session status",
   },
   {
     label: "/clear",
@@ -190,6 +224,16 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
     label: "/think <question>",
     insertText: "/think ",
     description: "think step by step",
+  },
+  {
+    label: "/retry",
+    insertText: "/retry",
+    description: "resend last message",
+  },
+  {
+    label: "/copy",
+    insertText: "/copy",
+    description: "copy last reply",
   },
   {
     label: "/browse <url>",
@@ -274,6 +318,7 @@ export async function runChatCommand(
 ): Promise<void> {
   console.clear();
   renderHiveHeader("Chat");
+  void checkForUpdates();
 
   const entrypoint = context.entrypoint ?? "chat-command";
   if (entrypoint === "chat-command") {
@@ -308,6 +353,8 @@ export async function runChatCommand(
       title: options.title,
       temperature,
     };
+    const lastUserPromptRef: { value: string | null } = { value: null };
+    const lastAssistantRef: { value: string } = { value: "" };
 
     renderChatPreamble({
       agentName,
@@ -319,14 +366,23 @@ export async function runChatCommand(
       const augmentedMessage = await buildBrowserAugmentedPrompt(options.message, {
         locationHint: profile.location ?? undefined,
       });
-      conversationId = await streamReply(
+      const memoryAddition = buildMemoryAddition(db, options.message);
+      const systemAddition = combineSystemAdditions([
+        getModeSystemPrompt(currentMode),
+        memoryAddition,
+      ]);
+      lastUserPromptRef.value = options.message;
+      const streamResult = await streamReply(
         agent,
         augmentedMessage,
         conversationId,
         runOptions,
         agentName,
-        currentMode,
+        systemAddition,
       );
+      conversationId = streamResult.conversationId;
+      lastAssistantRef.value = streamResult.assistantText;
+      saveEpisodeSummary(db, options.message, streamResult.assistantText);
       renderInfo(`conversation: ${conversationId}`);
       return;
     }
@@ -355,6 +411,8 @@ export async function runChatCommand(
         if (prompt === "/new") {
           conversationId = undefined;
           currentMode = "default";
+          lastUserPromptRef.value = null;
+          lastAssistantRef.value = "";
           renderInfo("Started a new conversation context.");
           continue;
         }
@@ -377,6 +435,8 @@ export async function runChatCommand(
             setMode: (mode) => {
               currentMode = mode;
             },
+            lastUserPromptRef,
+            lastAssistantRef,
           });
           if (handled) {
             continue;
@@ -419,14 +479,24 @@ export async function runChatCommand(
           const augmentedPrompt = await buildBrowserAugmentedPrompt(prompt, {
             locationHint: profile.location ?? undefined,
           });
-          conversationId = await streamReply(
+          lastUserPromptRef.value = prompt;
+          const memoryAddition = buildMemoryAddition(db, prompt);
+          const systemAddition = combineSystemAdditions([
+            getModeSystemPrompt(currentMode),
+            memoryAddition,
+          ]);
+
+          const streamResult = await streamReply(
             agent,
             augmentedPrompt,
             conversationId,
             runOptions,
             agentName,
-            currentMode,
+            systemAddition,
           );
+          conversationId = streamResult.conversationId;
+          lastAssistantRef.value = streamResult.assistantText;
+          saveEpisodeSummary(db, prompt, streamResult.assistantText);
         } catch (error) {
           renderError(formatError(error));
         }
@@ -436,28 +506,35 @@ export async function runChatCommand(
   }
 }
 
+interface StreamResult {
+  conversationId: string;
+  assistantText: string;
+}
+
 async function streamReply(
   agent: HiveAgent,
   prompt: string,
   conversationId: string | undefined,
   options: RunChatOptions,
   agentName: string,
-  mode: ModeName,
-): Promise<string> {
+  systemAddition?: string,
+): Promise<StreamResult> {
   process.stdout.write(getTheme().accent(`${agentName}${PROMPT_SYMBOL} `));
 
   let activeConversationId = conversationId;
+  let assistantText = "";
 
   for await (const event of agent.chat(prompt, {
     conversationId: activeConversationId,
     model: options.model,
     temperature: options.temperature,
     title: options.title,
-    systemAddition: getModeSystemPrompt(mode),
+    systemAddition,
   })) {
     if (event.type === "token") {
       process.stdout.write(event.token);
       activeConversationId = event.conversationId;
+      assistantText += event.token;
       continue;
     }
 
@@ -471,7 +548,7 @@ async function streamReply(
     throw new Error("Conversation state was not returned by the agent.");
   }
 
-  return activeConversationId;
+  return { conversationId: activeConversationId, assistantText };
 }
 
 function parseTemperature(raw?: string): number | undefined {
@@ -590,6 +667,15 @@ function getModeSystemPrompt(mode: ModeName): string | undefined {
   return MODE_PROMPTS[mode] ?? undefined;
 }
 
+function combineSystemAdditions(parts: Array<string | undefined | null>): string | undefined {
+  const merged = parts
+    .map((part) => part?.trim() ?? "")
+    .filter((part) => part.length > 0)
+    .join("\n\n");
+
+  return merged.length > 0 ? merged : undefined;
+}
+
 function isUnknownSlashCommand(prompt: string): boolean {
   const normalized = prompt.trim().toLowerCase();
   if (!normalized.startsWith("/")) {
@@ -608,6 +694,7 @@ function isUnknownSlashCommand(prompt: string): boolean {
     normalized === "/summarize" ||
     normalized.startsWith("/summarize ") ||
     normalized === "/tldr" ||
+    normalized === "/recap" ||
     normalized === "/mode" ||
     normalized.startsWith("/mode ") ||
     normalized === "/export" ||
@@ -615,6 +702,11 @@ function isUnknownSlashCommand(prompt: string): boolean {
     normalized === "/clear" ||
     normalized === "/think" ||
     normalized.startsWith("/think ") ||
+    normalized.startsWith("/save") ||
+    normalized.startsWith("/pin") ||
+    normalized === "/status" ||
+    normalized === "/retry" ||
+    normalized === "/copy" ||
     normalized === "/browse" ||
     normalized.startsWith("/browse ") ||
     normalized === "/search" ||
@@ -736,6 +828,8 @@ async function handleChatSlashCommand(input: {
   modelName: string;
   setConversationId: (id: string | undefined) => void;
   setMode: (mode: ModeName) => void;
+  lastUserPromptRef: { value: string | null };
+  lastAssistantRef: { value: string };
 }): Promise<boolean> {
   const normalized = input.prompt.trim();
   const lower = normalized.toLowerCase();
@@ -752,6 +846,8 @@ async function handleChatSlashCommand(input: {
       provider: input.providerName,
       model: input.modelName,
     });
+    input.lastUserPromptRef.value = null;
+    input.lastAssistantRef.value = "";
     return true;
   }
 
@@ -764,6 +860,7 @@ async function handleChatSlashCommand(input: {
 
     insertKnowledge(input.db, { content: fact });
     renderSuccess("✓ Remembered.");
+    input.lastUserPromptRef.value = null;
     return true;
   }
 
@@ -788,6 +885,7 @@ async function handleChatSlashCommand(input: {
 
     deleteKnowledge(input.db, match.id);
     renderSuccess("✓ Forgotten.");
+    input.lastUserPromptRef.value = null;
     return true;
   }
 
@@ -800,6 +898,20 @@ async function handleChatSlashCommand(input: {
 
     input.setMode(modeName as ModeName);
     renderSuccess(`✓ Mode set to ${modeName}.`);
+    input.lastUserPromptRef.value = null;
+    return true;
+  }
+
+  if (lower.startsWith("/pin")) {
+    const fact = normalized.slice("/pin".length).trim();
+    if (fact.length === 0) {
+      renderError("Usage: /pin <fact>");
+      return true;
+    }
+
+    insertKnowledge(input.db, { content: fact, pinned: true });
+    renderSuccess("✓ Pinned.");
+    input.lastUserPromptRef.value = null;
     return true;
   }
 
@@ -815,6 +927,7 @@ async function handleChatSlashCommand(input: {
     const exportPath = join(exportDir, `${input.conversationId}.md`);
     writeFileSync(exportPath, formatConversationMarkdown(messages, input.conversationId));
     renderSuccess(`✓ Exported to ${exportPath}`);
+    input.lastUserPromptRef.value = null;
     return true;
   }
 
@@ -844,6 +957,8 @@ async function handleChatSlashCommand(input: {
     const selected = rows[choice - 1];
     input.setConversationId(selected.id);
     renderInfo(`Continuing conversation ${selected.title ?? selected.id}.`);
+    input.lastUserPromptRef.value = null;
+    input.lastAssistantRef.value = "";
     return true;
   }
 
@@ -870,6 +985,23 @@ async function handleChatSlashCommand(input: {
         history,
       }),
     });
+    input.lastUserPromptRef.value = null;
+    return true;
+  }
+
+  if (lower === "/recap") {
+    const knowledge = listKnowledge(input.db, { limit: 500 });
+    await streamEphemeral({
+      provider: input.provider,
+      agentName: input.agentName,
+      model: input.modelName,
+      messages: buildRecapMessages({
+        persona: input.activeProfilePersona,
+        knowledge,
+        mode: input.mode,
+      }),
+    });
+    input.lastUserPromptRef.value = null;
     return true;
   }
 
@@ -899,6 +1031,23 @@ async function handleChatSlashCommand(input: {
     return true;
   }
 
+  if (lower.startsWith("/save")) {
+    const title = normalized.slice("/save".length).trim();
+    if (!input.conversationId) {
+      renderError("No active conversation to title.");
+      return true;
+    }
+    if (title.length === 0) {
+      renderError("Usage: /save <title>");
+      return true;
+    }
+
+    updateConversationTitle(input.db, input.conversationId, title);
+    renderSuccess(`✓ Saved title "${title}".`);
+    input.lastUserPromptRef.value = null;
+    return true;
+  }
+
   if (lower.startsWith("/think")) {
     const question = normalized.slice("/think".length).trim();
     if (question.length === 0) {
@@ -919,6 +1068,164 @@ async function handleChatSlashCommand(input: {
     return true;
   }
 
+  if (lower === "/status") {
+    const info = [
+      `mode=${input.mode}`,
+      `provider=${input.providerName}`,
+      `model=${input.modelName}`,
+      `conversation=${input.conversationId ?? "none"}`,
+    ].join(" · ");
+    renderInfo(info);
+    return true;
+  }
+
+  if (lower === "/retry") {
+    const userPrompt = input.lastUserPromptRef.value;
+    if (!userPrompt) {
+      renderError("Nothing to retry yet.");
+      return true;
+    }
+
+    const memoryAddition = buildMemoryAddition(input.db, userPrompt);
+    const systemAddition = combineSystemAdditions([
+      getModeSystemPrompt(input.mode),
+      memoryAddition,
+    ]);
+
+    const retryResult = await streamReply(
+      input.agent,
+      userPrompt,
+      input.conversationId,
+      { model: input.modelName },
+      input.agentName,
+      systemAddition,
+    );
+    input.setConversationId(retryResult.conversationId);
+    input.lastAssistantRef.value = retryResult.assistantText;
+    saveEpisodeSummary(input.db, userPrompt, retryResult.assistantText);
+    return true;
+  }
+
+  if (lower === "/copy") {
+    if (!input.lastAssistantRef.value) {
+      renderError("Nothing to copy yet.");
+      return true;
+    }
+
+    const copied = copyToClipboard(input.lastAssistantRef.value);
+    if (copied) {
+      renderSuccess("✓ Copied last reply to clipboard.");
+    } else {
+      renderError("Clipboard tool not available.");
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function buildMemoryAddition(db: HiveDatabase, userPrompt: string): string | undefined {
+  const pinned = listPinnedKnowledge(db);
+  const relevantEpisodes = findRelevantEpisodes(db, userPrompt, 3);
+
+  const sections: string[] = [];
+
+  if (pinned.length > 0) {
+    sections.push(
+      "Pinned knowledge:",
+      ...pinned.map((item) => `- ${item.content}`),
+    );
+  }
+
+  if (relevantEpisodes.length > 0) {
+    sections.push(
+      "Relevant memories:",
+      ...relevantEpisodes.map((item) => `- ${item.episode.content}`),
+    );
+  }
+
+  const combined = sections.join("\n");
+  return combined.length > 0 ? combined : undefined;
+}
+
+function saveEpisodeSummary(db: HiveDatabase, userPrompt: string, assistantText: string): void {
+  const summary = `User: ${userPrompt}\nHive: ${assistantText}`;
+  const trimmed = summary.length > 2000 ? `${summary.slice(0, 2000)}…` : summary;
+  insertEpisode(db, trimmed);
+}
+
+function copyToClipboard(text: string): boolean {
+  const platform = process.platform;
+  const buffer = Buffer.from(text, "utf8");
+
+  if (platform === "darwin") {
+    const result = spawnSync("pbcopy", [], { input: buffer });
+    return result.status === 0;
+  }
+
+  const result = spawnSync("xclip", ["-selection", "clipboard"], { input: buffer });
+  return result.status === 0;
+}
+
+let cachedLocalVersion: string | null = null;
+
+async function checkForUpdates(): Promise<void> {
+  try {
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("timeout")), 3000),
+    );
+
+    const latest = (await Promise.race([
+      fetch("https://registry.npmjs.org/@imisbahk/hive/latest").then((response) => response.json()),
+      timeout,
+    ])) as { version?: string } | undefined;
+
+    if (!latest?.version || typeof latest.version !== "string") {
+      return;
+    }
+
+    const localVersion = getLocalVersion();
+    if (isVersionNewer(latest.version, localVersion)) {
+      const amber = chalk.hex("#ffbf00");
+      console.log(amber.dim(`✦ Update available v${localVersion} → npm update -g @imisbahk/hive`));
+    }
+  } catch {
+    // Silently ignore update check failures.
+  }
+}
+
+function getLocalVersion(): string {
+  if (cachedLocalVersion) {
+    return cachedLocalVersion;
+  }
+
+  try {
+    const raw = readFileSync(new URL("../../../package.json", import.meta.url), "utf8");
+    const parsed = JSON.parse(raw) as { version?: string };
+    if (parsed.version) {
+      cachedLocalVersion = parsed.version;
+      return cachedLocalVersion;
+    }
+  } catch {
+    // ignore
+  }
+
+  cachedLocalVersion = "0.0.0";
+  return cachedLocalVersion;
+}
+
+function isVersionNewer(remote: string, local: string): boolean {
+  const toNumbers = (value: string) => value.split(".").map((part) => Number.parseInt(part, 10));
+  const r = toNumbers(remote);
+  const l = toNumbers(local);
+  const length = Math.max(r.length, l.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const rv = r[index] ?? 0;
+    const lv = l[index] ?? 0;
+    if (rv > lv) return true;
+    if (rv < lv) return false;
+  }
   return false;
 }
 
@@ -1022,6 +1329,25 @@ function buildEphemeralMessages(input: {
   }
 
   return messages;
+}
+
+function buildRecapMessages(input: {
+  persona: string;
+  knowledge: KnowledgeRecord[];
+  mode: ModeName;
+}): ProviderMessage[] {
+  const knowledgeLines =
+    input.knowledge.length > 0
+      ? input.knowledge.map((row) => `- ${row.content}`).join("\n")
+      : "No knowledge stored yet.";
+
+  const userMessage = `Summarize everything you know about the user based on persona and knowledge facts below. Be concise.\n\nPersona:\n${input.persona}\n\nKnowledge facts:\n${knowledgeLines}`;
+
+  return buildEphemeralMessages({
+    persona: input.persona,
+    mode: input.mode,
+    userMessage,
+  });
 }
 
 function formatConversationMarkdown(
