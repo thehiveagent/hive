@@ -37,6 +37,7 @@
         "openai": "^4.28.0",
         "ora": "^8.0.1",
         "playwright": "^1.58.2",
+        "typecheck": "^0.1.2",
         "uuid": "^9.0.1"
     },
     "devDependencies": {
