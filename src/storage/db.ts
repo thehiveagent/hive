@@ -10,6 +10,8 @@ import {
   MIGRATIONS,
   type AgentRecord,
   type ConversationRecord,
+  type EpisodeRecord,
+  type KnowledgeRecord,
   type MessageRecord,
   type MessageRole,
   type MetaRecord,
@@ -19,6 +21,8 @@ export type HiveDatabase = Database.Database;
 export type {
   AgentRecord,
   ConversationRecord,
+  EpisodeRecord,
+  KnowledgeRecord,
   MessageRecord,
   MessageRole,
   MetaRecord,
@@ -47,9 +51,30 @@ export interface AppendMessageInput {
   content: string;
 }
 
+export interface InsertKnowledgeInput {
+  content: string;
+  pinned?: boolean;
+}
+
+export interface ListKnowledgeOptions {
+  limit?: number;
+}
+
 export interface UpdatePrimaryAgentProviderModelInput {
   provider: string;
   model: string;
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string | null;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface RelevantEpisode {
+  episode: EpisodeRecord;
+  score: number;
 }
 
 export const HIVE_DIRECTORY_NAME = ".hive";
@@ -84,6 +109,10 @@ export function openHiveDatabase(databasePath = getHiveDatabasePath()): HiveData
 
 export function closeHiveDatabase(db: HiveDatabase): void {
   db.close();
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
 }
 
 function configureDatabase(db: HiveDatabase): void {
@@ -147,10 +176,6 @@ function ensureAgentProfileColumns(db: HiveDatabase): void {
 
     db.exec(`ALTER TABLE agents ADD COLUMN ${column.name} ${column.definition}`);
   }
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
 }
 
 export function getMetaValue(db: HiveDatabase, key: string): string | null {
@@ -382,6 +407,34 @@ export function createConversation(
   };
 }
 
+export function updateConversationTitle(
+  db: HiveDatabase,
+  conversationId: string,
+  title: string,
+): ConversationRecord {
+  const existing = getConversationById(db, conversationId);
+  if (!existing) {
+    throw new Error(`Conversation "${conversationId}" was not found.`);
+  }
+
+  const trimmed = title.trim();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+    UPDATE conversations
+    SET title = ?, updated_at = ?
+    WHERE id = ?
+  `,
+  ).run(trimmed, timestamp, conversationId);
+
+  return {
+    ...existing,
+    title: trimmed,
+    updated_at: timestamp,
+  };
+}
+
 export function getConversationById(
   db: HiveDatabase,
   conversationId: string,
@@ -473,4 +526,208 @@ export function listMessages(
     `,
     )
     .all(conversationId, limit) as MessageRecord[];
+}
+
+export function listConversationMessages(
+  db: HiveDatabase,
+  conversationId: string,
+): MessageRecord[] {
+  return db
+    .prepare(
+      `
+      SELECT id, conversation_id, role, content, created_at
+      FROM messages
+      WHERE conversation_id = ?
+      ORDER BY datetime(created_at) ASC
+    `,
+    )
+    .all(conversationId) as MessageRecord[];
+}
+
+export function listRecentConversations(
+  db: HiveDatabase,
+  limit = 10,
+): ConversationSummary[] {
+  return db
+    .prepare(
+      `
+      SELECT
+        c.id,
+        c.title,
+        c.updated_at,
+        COUNT(m.id) AS message_count
+      FROM conversations c
+      LEFT JOIN messages m ON m.conversation_id = c.id
+      GROUP BY c.id, c.title, c.updated_at
+      ORDER BY datetime(c.updated_at) DESC
+      LIMIT ?
+    `,
+    )
+    .all(limit) as ConversationSummary[];
+}
+
+export function insertKnowledge(db: HiveDatabase, input: InsertKnowledgeInput): KnowledgeRecord {
+  const id = uuidv4();
+  const timestamp = nowIso();
+  const pinnedValue = input.pinned ? 1 : 0;
+
+  db.prepare(
+    `
+    INSERT INTO knowledge (id, content, created_at, pinned)
+    VALUES (?, ?, ?, ?)
+  `,
+  ).run(id, input.content.trim(), timestamp, pinnedValue);
+
+  return {
+    id,
+    content: input.content.trim(),
+    created_at: timestamp,
+    pinned: pinnedValue,
+  };
+}
+
+export function listKnowledge(
+  db: HiveDatabase,
+  options: ListKnowledgeOptions = {},
+): KnowledgeRecord[] {
+  const limit = options.limit ?? 100;
+  return db
+    .prepare(
+      `
+      SELECT id, content, created_at, pinned
+      FROM knowledge
+      ORDER BY datetime(created_at) DESC
+      LIMIT ?
+    `,
+    )
+    .all(limit) as KnowledgeRecord[];
+}
+
+export function findClosestKnowledge(db: HiveDatabase, query: string): KnowledgeRecord | null {
+  const normalized = query.trim();
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  const row = db
+    .prepare(
+      `
+      SELECT
+        id,
+        content,
+        created_at,
+        pinned,
+        CASE WHEN content LIKE ? THEN 0 ELSE 1 END AS mismatch,
+        ABS(LENGTH(content) - ?) AS length_diff
+      FROM knowledge
+      ORDER BY mismatch ASC, length_diff ASC, datetime(created_at) DESC
+      LIMIT 1
+    `,
+    )
+    .get(`%${normalized}%`, normalized.length) as
+    | (KnowledgeRecord & { mismatch: number; length_diff: number })
+    | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    content: row.content,
+    created_at: row.created_at,
+    pinned: row.pinned,
+  };
+}
+
+export function deleteKnowledge(db: HiveDatabase, id: string): void {
+  db.prepare("DELETE FROM knowledge WHERE id = ?").run(id);
+}
+
+export function listPinnedKnowledge(db: HiveDatabase): KnowledgeRecord[] {
+  return db
+    .prepare(
+      `
+      SELECT id, content, created_at, pinned
+      FROM knowledge
+      WHERE pinned = 1
+      ORDER BY datetime(created_at) DESC
+    `,
+    )
+    .all() as KnowledgeRecord[];
+}
+
+export function insertEpisode(db: HiveDatabase, content: string): EpisodeRecord {
+  const id = uuidv4();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+    INSERT INTO episodes (id, content, created_at)
+    VALUES (?, ?, ?)
+  `,
+  ).run(id, content.trim(), timestamp);
+
+  return {
+    id,
+    content: content.trim(),
+    created_at: timestamp,
+  };
+}
+
+export function listEpisodes(db: HiveDatabase, limit = 200): EpisodeRecord[] {
+  return db
+    .prepare(
+      `
+      SELECT id, content, created_at
+      FROM episodes
+      ORDER BY datetime(created_at) DESC
+      LIMIT ?
+    `,
+    )
+    .all(limit) as EpisodeRecord[];
+}
+
+export function findRelevantEpisodes(
+  db: HiveDatabase,
+  query: string,
+  limit = 3,
+): RelevantEpisode[] {
+  const normalized = query.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return [];
+  }
+
+  const terms = Array.from(
+    new Set(
+      normalized
+        .split(/\W+/)
+        .map((term) => term.trim())
+        .filter((term) => term.length >= 4),
+    ),
+  );
+
+  if (terms.length === 0) {
+    return [];
+  }
+
+  const episodes = listEpisodes(db, 200);
+  const scored: RelevantEpisode[] = episodes
+    .map((episode) => {
+      const text = episode.content.toLowerCase();
+      const score = terms.reduce((acc, term) => (text.includes(term) ? acc + 1 : acc), 0);
+      return { episode, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.episode.created_at.localeCompare(a.episode.created_at),
+    );
+
+  return scored.slice(0, limit);
+}
+
+export function clearEpisodes(db: HiveDatabase): void {
+  db.exec("DELETE FROM episodes");
 }
