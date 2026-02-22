@@ -7,9 +7,12 @@ import { openPage, search, type SearchResult } from "../browser/browser.js";
 import {
   appendMessage,
   createConversation,
+  findRelevantEpisodes,
   getConversationById,
   getPrimaryAgent,
+  insertEpisode,
   listMessages,
+  listPinnedKnowledge,
 } from "../storage/db.js";
 import {
   chunkText,
@@ -78,15 +81,15 @@ export interface PromptContext {
 
 export type AgentStreamEvent =
   | {
-      type: "token";
-      conversationId: string;
-      token: string;
-    }
+    type: "token";
+    conversationId: string;
+    token: string;
+  }
   | {
-      type: "done";
-      conversationId: string;
-      assistantMessageId: string;
-    };
+    type: "done";
+    conversationId: string;
+    assistantMessageId: string;
+  };
 
 export class HiveAgent {
   private readonly historyLimit = 80;
@@ -95,7 +98,7 @@ export class HiveAgent {
     private readonly db: HiveDatabase,
     private readonly provider: Provider,
     private readonly agent: AgentRecord,
-  ) {}
+  ) { }
 
   static async load(db: HiveDatabase, provider?: Provider): Promise<HiveAgent> {
     const agent = getPrimaryAgent(db);
@@ -136,6 +139,9 @@ export class HiveAgent {
     });
 
     const history = listMessages(this.db, conversation.id, this.historyLimit);
+
+    const memoryAddition = this.buildMemoryAddition(trimmed);
+
     const providerRequest: StreamChatRequest = {
       model: options.model ?? this.agent.model,
       temperature: options.temperature,
@@ -149,13 +155,21 @@ export class HiveAgent {
           role: "system",
           content: this.agent.persona,
         },
+        ...(memoryAddition
+          ? [
+            {
+              role: "system" as const,
+              content: memoryAddition,
+            },
+          ]
+          : []),
         ...(options.systemAddition
           ? [
-              {
-                role: "system" as const,
-                content: options.systemAddition,
-              },
-            ]
+            {
+              role: "system" as const,
+              content: options.systemAddition,
+            },
+          ]
           : []),
         ...history.map((message) => ({
           role: message.role,
@@ -180,11 +194,40 @@ export class HiveAgent {
       content: assistantText,
     });
 
+    this.saveEpisodeSummary(trimmed, assistantText);
+
     yield {
       type: "done",
       conversationId: conversation.id,
       assistantMessageId: savedMessage.id,
     };
+  }
+
+  private buildMemoryAddition(userPrompt: string): string | undefined {
+    const pinned = listPinnedKnowledge(this.db);
+    const relevantEpisodes = findRelevantEpisodes(this.db, userPrompt, 3);
+
+    const sections: string[] = [];
+
+    if (pinned.length > 0) {
+      sections.push("Pinned knowledge:", ...pinned.map((item) => `- ${item.content}`));
+    }
+
+    if (relevantEpisodes.length > 0) {
+      sections.push(
+        "Relevant memories:",
+        ...relevantEpisodes.map((item) => `- ${item.episode.content}`),
+      );
+    }
+
+    const combined = sections.join("\n");
+    return combined.length > 0 ? combined : undefined;
+  }
+
+  private saveEpisodeSummary(userPrompt: string, assistantText: string): void {
+    const summary = `User: ${userPrompt}\nHive: ${assistantText}`;
+    const trimmed = summary.length > 2000 ? `${summary.slice(0, 2000)}…` : summary;
+    insertEpisode(this.db, trimmed);
   }
 
   private resolveConversation(
@@ -200,7 +243,7 @@ export class HiveAgent {
 
     const existingConversation = getConversationById(this.db, conversationId);
     if (!existingConversation) {
-      throw new Error(`Conversation \"${conversationId}\" was not found.`);
+      throw new Error(`Conversation "${conversationId}" was not found.`);
     }
 
     if (existingConversation.agent_id !== this.agent.id) {
@@ -408,7 +451,7 @@ export async function handleSearchSlashCommand(
       : `Interpreted query with location context: "${query}" (from "${rawQuery}").\n\n`;
 
   return buildUntrustedContextMessage({
-    sourceLabel: `Search results for \"${query}\"`,
+    sourceLabel: `Search results for "${query}"`,
     userPrompt: rawQuery,
     content: `${interpretedPrefix}${formatSearchResults(results)}`,
   });
