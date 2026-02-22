@@ -23,13 +23,17 @@ import {
   getPrimaryAgent,
   getHiveHomeDir,
   insertKnowledge,
-  type KnowledgeRecord,
+  insertEpisode,
+  listPinnedKnowledge,
   listKnowledge,
+  type KnowledgeRecord,
   type MessageRecord,
   listConversationMessages,
   listRecentConversations,
   openHiveDatabase,
   updateConversationTitle,
+  clearEpisodes,
+  findRelevantEpisodes,
 } from "../../storage/db.js";
 import { createProvider } from "../../providers/index.js";
 import {
@@ -102,6 +106,9 @@ const COMMAND_HELP_TEXT = [
   "  /think <question>think step by step",
   "  /retry           resend last message",
   "  /copy            copy last reply",
+  "  /hive memory list  show knowledge items",
+  "  /hive memory clear clear episodic memory",
+  "  /hive memory show  show current persona",
   "  /browse <url>   read a webpage",
   "  browse <url>    same as /browse",
   "  /search <query> search the web",
@@ -120,6 +127,9 @@ const HIVE_SHORTCUT_HELP_TEXT = [
   "  /hive help         list shortcuts",
   "  /hive status       run hive status",
   "  /hive config show  run hive config show",
+  "  /hive memory list  list knowledge",
+  "  /hive memory clear clear episodes",
+  "  /hive memory show  show persona",
   "",
   "Interactive config commands (in chat):",
   "  /hive config provider",
@@ -261,6 +271,21 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
     label: "/hive config show",
     insertText: "/hive config show",
     description: "run hive config show",
+  },
+  {
+    label: "/hive memory list",
+    insertText: "/hive memory list",
+    description: "list knowledge entries",
+  },
+  {
+    label: "/hive memory clear",
+    insertText: "/hive memory clear",
+    description: "clear episodic memory",
+  },
+  {
+    label: "/hive memory show",
+    insertText: "/hive memory show",
+    description: "show current persona",
   },
   {
     label: "/hive init",
@@ -436,9 +461,10 @@ export async function runChatCommand(
           continue;
         }
 
-        const shortcutResult = await handleHiveShortcut(prompt, {
-          allowInteractiveConfig: true,
-        });
+          const shortcutResult = await handleHiveShortcut(prompt, {
+            allowInteractiveConfig: true,
+            db,
+          });
         if (shortcutResult === "handled") {
           continue;
         }
@@ -713,6 +739,7 @@ async function handleHiveShortcut(
   prompt: string,
   options: {
     allowInteractiveConfig?: boolean;
+    db?: HiveDatabase;
   } = {},
 ): Promise<HiveShortcutResult> {
   const normalized = prompt.trim().replace(/\s+/g, " ");
@@ -744,6 +771,63 @@ async function handleHiveShortcut(
   if (subcommand === "config show") {
     await runConfigShowCommandWithOptions({ showHeader: false });
     restoreChatInputAfterInteractiveCommand();
+    return "handled";
+  }
+
+  if (subcommand === "memory list") {
+    const db = options.db;
+    if (!db) {
+      renderError("Memory commands unavailable: database not open.");
+      return "handled";
+    }
+
+    const rows = listKnowledge(db, { limit: 1000 });
+    if (rows.length === 0) {
+      renderInfo("No knowledge stored.");
+      return "handled";
+    }
+
+    rows.forEach((row, index) => {
+      const pinnedLabel = row.pinned ? " (pinned)" : "";
+      renderInfo(`${index + 1}. ${row.content}${pinnedLabel}`);
+    });
+    return "handled";
+  }
+
+  if (subcommand === "memory clear") {
+    const db = options.db;
+    if (!db) {
+      renderError("Memory commands unavailable: database not open.");
+      return "handled";
+    }
+
+    const confirmed = await promptYesNo(
+      "This will delete all episodic memories. Continue? (y/n) ",
+    );
+    if (!confirmed) {
+      renderInfo("Cancelled.");
+      return "handled";
+    }
+
+    clearEpisodes(db);
+    renderSuccess("Episodes cleared.");
+    return "handled";
+  }
+
+  if (subcommand === "memory show") {
+    const db = options.db;
+    if (!db) {
+      renderError("Memory commands unavailable: database not open.");
+      return "handled";
+    }
+
+    const agent = getPrimaryAgent(db);
+    if (!agent) {
+      renderError("Hive is not initialized. Run `hive init` first.");
+      return "handled";
+    }
+
+    renderInfo(agent.persona);
     return "handled";
   }
 
