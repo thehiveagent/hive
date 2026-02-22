@@ -1,14 +1,29 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { stdin, stdout } from "node:process";
 import * as readline from "node:readline";
 import { createInterface } from "node:readline/promises";
 
 import chalk from "chalk";
 import { Command } from "commander";
+import type { Provider, ProviderMessage } from "../../providers/base.js";
 
-import { buildBrowserAugmentedPrompt, HiveAgent } from "../../agent/agent.js";
+import {
+  RUNTIME_SYSTEM_GUARDRAILS,
+  buildBrowserAugmentedPrompt,
+  HiveAgent,
+} from "../../agent/agent.js";
 import {
   closeHiveDatabase,
+  deleteKnowledge,
+  findClosestKnowledge,
+  type HiveDatabase,
   getPrimaryAgent,
+  getHiveHomeDir,
+  insertKnowledge,
+  type MessageRecord,
+  listConversationMessages,
+  listRecentConversations,
   openHiveDatabase,
 } from "../../storage/db.js";
 import { createProvider } from "../../providers/index.js";
@@ -17,7 +32,9 @@ import {
   renderHiveHeader,
   renderInfo,
   renderSeparator,
+  renderSuccess,
 } from "../ui.js";
+import { openPage } from "../../browser/browser.js";
 import {
   runConfigKeyCommandWithOptions,
   runConfigModelCommandWithOptions,
@@ -54,6 +71,7 @@ interface CommandSuggestion {
 }
 
 type HiveShortcutResult = "not-handled" | "handled" | "config-updated";
+type ModeName = "default" | "research" | "code" | "brainstorm" | "brief";
 
 const PROMPT_SYMBOL = "›";
 const USER_PROMPT = `you${PROMPT_SYMBOL} `;
@@ -64,6 +82,15 @@ const COMMAND_HELP_TEXT = [
   "Commands:",
   "  /help           show commands",
   "  /new            start a new conversation",
+  "  /remember <fact> save a fact",
+  "  /forget <thing>  delete closest fact",
+  "  /summarize <url> summarize a web page",
+  "  /tldr            summarize this conversation",
+  "  /mode <name>     switch response mode",
+  "  /export          export conversation markdown",
+  "  /history         list recent conversations",
+  "  /clear           clear the screen",
+  "  /think <question>think step by step",
   "  /browse <url>   read a webpage",
   "  browse <url>    same as /browse",
   "  /search <query> search the web",
@@ -99,6 +126,15 @@ const PREVIEW_AGENT_NAME = "jarvis";
 const PREVIEW_PROVIDER = "google";
 const PREVIEW_MODEL = "gemini-2.0-flash";
 const PREVIEW_NEW_MESSAGE = "Started a new preview conversation context.";
+const MODE_PROMPTS: Record<ModeName, string | null> = {
+  default: null,
+  research:
+    "Every answer must be grounded in current web evidence. Perform web search as needed and cite sources inline.",
+  code: "Think and respond like a focused software engineer. Prioritize concise technical answers and code.",
+  brainstorm:
+    "Be creative and opinionated. Offer bold suggestions and push back on weak ideas when helpful.",
+  brief: "Keep every response to a maximum of 3 sentences while preserving key details.",
+};
 const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
   {
     label: "/help",
@@ -109,6 +145,51 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
     label: "/new",
     insertText: "/new",
     description: "start a new conversation",
+  },
+  {
+    label: "/remember <fact>",
+    insertText: "/remember ",
+    description: "save to knowledge graph",
+  },
+  {
+    label: "/forget <thing>",
+    insertText: "/forget ",
+    description: "delete closest fact",
+  },
+  {
+    label: "/summarize <url>",
+    insertText: "/summarize ",
+    description: "summarize a web page",
+  },
+  {
+    label: "/tldr",
+    insertText: "/tldr",
+    description: "summarize this conversation",
+  },
+  {
+    label: "/mode <name>",
+    insertText: "/mode ",
+    description: "switch response style",
+  },
+  {
+    label: "/export",
+    insertText: "/export",
+    description: "export conversation markdown",
+  },
+  {
+    label: "/history",
+    insertText: "/history",
+    description: "list recent conversations",
+  },
+  {
+    label: "/clear",
+    insertText: "/clear",
+    description: "clear the screen",
+  },
+  {
+    label: "/think <question>",
+    insertText: "/think ",
+    description: "think step by step",
   },
   {
     label: "/browse <url>",
@@ -218,6 +299,7 @@ export async function runChatCommand(
     let provider = await createProvider(activeProfile.provider);
     let agent = new HiveAgent(db, provider, activeProfile);
     let agentName = resolveAgentName(activeProfile.agent_name);
+    let currentMode: ModeName = "default";
     const model = options.model ?? activeProfile.model;
 
     let conversationId = options.conversation;
@@ -243,6 +325,7 @@ export async function runChatCommand(
         conversationId,
         runOptions,
         agentName,
+        currentMode,
       );
       renderInfo(`conversation: ${conversationId}`);
       return;
@@ -271,60 +354,83 @@ export async function runChatCommand(
 
         if (prompt === "/new") {
           conversationId = undefined;
+          currentMode = "default";
           renderInfo("Started a new conversation context.");
           continue;
         }
 
         try {
-        const shortcutResult = await handleHiveShortcut(prompt, {
-          allowInteractiveConfig: true,
-        });
-        if (shortcutResult === "handled") {
-          continue;
-        }
-        if (shortcutResult === "config-updated") {
-          const latestProfile = getPrimaryAgent(db);
-          if (!latestProfile) {
-            renderError("Hive is not initialized. Run `hive init` first.");
+          const handled = await handleChatSlashCommand({
+            prompt,
+            db,
+            agent,
+            provider,
+            agentName,
+            conversationId,
+            activeProfilePersona: activeProfile.persona,
+            mode: currentMode,
+            providerName: activeProfile.provider,
+            modelName: runOptions.model ?? activeProfile.model,
+            setConversationId: (id) => {
+              conversationId = id;
+            },
+            setMode: (mode) => {
+              currentMode = mode;
+            },
+          });
+          if (handled) {
             continue;
           }
 
-          activeProfile = latestProfile;
-          provider = await createProvider(activeProfile.provider);
-          agent = new HiveAgent(db, provider, activeProfile);
-          agentName = resolveAgentName(activeProfile.agent_name);
-          if (!options.model) {
-            runOptions.model = activeProfile.model;
+          const shortcutResult = await handleHiveShortcut(prompt, {
+            allowInteractiveConfig: true,
+          });
+          if (shortcutResult === "handled") {
+            continue;
+          }
+          if (shortcutResult === "config-updated") {
+            const latestProfile = getPrimaryAgent(db);
+            if (!latestProfile) {
+              renderError("Hive is not initialized. Run `hive init` first.");
+              continue;
+            }
+
+            activeProfile = latestProfile;
+            provider = await createProvider(activeProfile.provider);
+            agent = new HiveAgent(db, provider, activeProfile);
+            agentName = resolveAgentName(activeProfile.agent_name);
+            if (!options.model) {
+              runOptions.model = activeProfile.model;
+            }
+
+            conversationId = undefined;
+            renderInfo(
+              `Switched to ${activeProfile.provider} · ${runOptions.model ?? activeProfile.model}.`,
+            );
+            renderInfo("Started a new conversation context.");
+            continue;
           }
 
-          conversationId = undefined;
-          renderInfo(
-            `Switched to ${activeProfile.provider} · ${runOptions.model ?? activeProfile.model}.`,
+          if (isUnknownSlashCommand(prompt)) {
+            renderError("✗ Unknown command. Type /help for available commands.");
+            continue;
+          }
+
+          const augmentedPrompt = await buildBrowserAugmentedPrompt(prompt, {
+            locationHint: profile.location ?? undefined,
+          });
+          conversationId = await streamReply(
+            agent,
+            augmentedPrompt,
+            conversationId,
+            runOptions,
+            agentName,
+            currentMode,
           );
-          renderInfo("Started a new conversation context.");
-          continue;
+        } catch (error) {
+          renderError(formatError(error));
         }
-
-        if (isUnknownSlashCommand(prompt)) {
-          renderError(`Unknown command: ${prompt}`);
-          renderInfo("Run `/help` to view supported commands.");
-          continue;
-        }
-
-        const augmentedPrompt = await buildBrowserAugmentedPrompt(prompt, {
-          locationHint: profile.location ?? undefined,
-        });
-        conversationId = await streamReply(
-          agent,
-          augmentedPrompt,
-          conversationId,
-          runOptions,
-          agentName,
-        );
-      } catch (error) {
-        renderError(formatError(error));
       }
-    }
   } finally {
     closeHiveDatabase(db);
   }
@@ -336,6 +442,7 @@ async function streamReply(
   conversationId: string | undefined,
   options: RunChatOptions,
   agentName: string,
+  mode: ModeName,
 ): Promise<string> {
   process.stdout.write(getTheme().accent(`${agentName}${PROMPT_SYMBOL} `));
 
@@ -346,6 +453,7 @@ async function streamReply(
     model: options.model,
     temperature: options.temperature,
     title: options.title,
+    systemAddition: getModeSystemPrompt(mode),
   })) {
     if (event.type === "token") {
       process.stdout.write(event.token);
@@ -478,6 +586,10 @@ function isHiveShortcut(prompt: string): boolean {
   return normalized === HIVE_SHORTCUT_PREFIX || normalized.startsWith(`${HIVE_SHORTCUT_PREFIX} `);
 }
 
+function getModeSystemPrompt(mode: ModeName): string | undefined {
+  return MODE_PROMPTS[mode] ?? undefined ?? undefined;
+}
+
 function isUnknownSlashCommand(prompt: string): boolean {
   const normalized = prompt.trim().toLowerCase();
   if (!normalized.startsWith("/")) {
@@ -489,6 +601,20 @@ function isUnknownSlashCommand(prompt: string): boolean {
     normalized === "/new" ||
     normalized === "/exit" ||
     normalized === "/quit" ||
+    normalized === "/remember" ||
+    normalized.startsWith("/remember ") ||
+    normalized === "/forget" ||
+    normalized.startsWith("/forget ") ||
+    normalized === "/summarize" ||
+    normalized.startsWith("/summarize ") ||
+    normalized === "/tldr" ||
+    normalized === "/mode" ||
+    normalized.startsWith("/mode ") ||
+    normalized === "/export" ||
+    normalized === "/history" ||
+    normalized === "/clear" ||
+    normalized === "/think" ||
+    normalized.startsWith("/think ") ||
     normalized === "/browse" ||
     normalized.startsWith("/browse ") ||
     normalized === "/search" ||
@@ -597,6 +723,205 @@ async function handleHiveShortcut(
   return "handled";
 }
 
+async function handleChatSlashCommand(input: {
+  prompt: string;
+  db: HiveDatabase;
+  agent: HiveAgent;
+  provider: Provider;
+  agentName: string;
+  conversationId: string | undefined;
+  activeProfilePersona: string;
+  mode: ModeName;
+  providerName: string;
+  modelName: string;
+  setConversationId: (id: string | undefined) => void;
+  setMode: (mode: ModeName) => void;
+}): Promise<boolean> {
+  const normalized = input.prompt.trim();
+  const lower = normalized.toLowerCase();
+
+  if (!lower.startsWith("/")) {
+    return false;
+  }
+
+  if (lower === "/clear") {
+    console.clear();
+    renderHiveHeader("Chat");
+    renderChatPreamble({
+      agentName: input.agentName,
+      provider: input.providerName,
+      model: input.modelName,
+    });
+    return true;
+  }
+
+  if (lower.startsWith("/remember")) {
+    const fact = normalized.slice("/remember".length).trim();
+    if (fact.length === 0) {
+      renderError("Usage: /remember <fact>");
+      return true;
+    }
+
+    insertKnowledge(input.db, { content: fact });
+    renderSuccess("✓ Remembered.");
+    return true;
+  }
+
+  if (lower.startsWith("/forget")) {
+    const query = normalized.slice("/forget".length).trim();
+    if (query.length === 0) {
+      renderError("Usage: /forget <thing>");
+      return true;
+    }
+
+    const match = findClosestKnowledge(input.db, query);
+    if (!match) {
+      renderError("No similar knowledge found.");
+      return true;
+    }
+
+    const confirmed = await promptYesNo(`Forget "${match.content}"? (y/n) `);
+    if (!confirmed) {
+      renderInfo("Kept.");
+      return true;
+    }
+
+    deleteKnowledge(input.db, match.id);
+    renderSuccess("✓ Forgotten.");
+    return true;
+  }
+
+  if (lower.startsWith("/mode")) {
+    const modeName = normalized.slice("/mode".length).trim().toLowerCase();
+    if (!modeName || !Object.hasOwn(MODE_PROMPTS, modeName)) {
+      renderError("Usage: /mode <default|research|code|brainstorm|brief>");
+      return true;
+    }
+
+    input.setMode(modeName as ModeName);
+    renderSuccess(`✓ Mode set to ${modeName}.`);
+    return true;
+  }
+
+  if (lower === "/export") {
+    if (!input.conversationId) {
+      renderError("No conversation to export. Start chatting first.");
+      return true;
+    }
+
+    const messages = listConversationMessages(input.db, input.conversationId);
+    const exportDir = join(getHiveHomeDir(), "exports");
+    mkdirSync(exportDir, { recursive: true });
+    const exportPath = join(exportDir, `${input.conversationId}.md`);
+    writeFileSync(exportPath, formatConversationMarkdown(messages, input.conversationId));
+    renderSuccess(`✓ Exported to ${exportPath}`);
+    return true;
+  }
+
+  if (lower === "/history") {
+    const rows = listRecentConversations(input.db, 10);
+    if (rows.length === 0) {
+      renderInfo("No past conversations found.");
+      return true;
+    }
+
+    rows.forEach((row, index) => {
+      const title = row.title?.trim().length ? row.title : "(untitled)";
+      renderInfo(`${index + 1}. ${title} · ${row.updated_at} · ${row.message_count} messages`);
+    });
+
+    const answer = await promptLine("Pick a conversation number (or blank to cancel): ");
+    if (!answer) {
+      return true;
+    }
+
+    const choice = Number.parseInt(answer, 10);
+    if (Number.isNaN(choice) || choice < 1 || choice > rows.length) {
+      renderError("Invalid selection.");
+      return true;
+    }
+
+    const selected = rows[choice - 1];
+    input.setConversationId(selected.id);
+    renderInfo(`Continuing conversation ${selected.title ?? selected.id}.`);
+    return true;
+  }
+
+  if (lower === "/tldr") {
+    if (!input.conversationId) {
+      renderError("No conversation yet. Say something first.");
+      return true;
+    }
+
+    const history = listConversationMessages(input.db, input.conversationId);
+    if (history.length === 0) {
+      renderError("Nothing to summarize yet.");
+      return true;
+    }
+
+    await streamEphemeral({
+      provider: input.provider,
+      agentName: input.agentName,
+      model: input.modelName,
+      messages: buildEphemeralMessages({
+        persona: input.activeProfilePersona,
+        mode: input.mode,
+        systemInstruction: "Summarize this conversation in 3-5 bullet points.",
+        history,
+      }),
+    });
+    return true;
+  }
+
+  if (lower.startsWith("/summarize")) {
+    const url = normalized.slice("/summarize".length).trim();
+    if (url.length === 0) {
+      renderError("Usage: /summarize <url>");
+      return true;
+    }
+
+    try {
+      const content = await openPage(url);
+      await streamEphemeral({
+        provider: input.provider,
+        agentName: input.agentName,
+        model: input.modelName,
+        messages: buildEphemeralMessages({
+          persona: input.activeProfilePersona,
+          mode: input.mode,
+          userMessage: `Summarize this page concisely:\n\n${content}`,
+        }),
+      });
+    } catch (error) {
+      renderError(`Unable to summarize page: ${formatError(error)}`);
+    }
+
+    return true;
+  }
+
+  if (lower.startsWith("/think")) {
+    const question = normalized.slice("/think".length).trim();
+    if (question.length === 0) {
+      renderError("Usage: /think <question>");
+      return true;
+    }
+
+    await streamEphemeral({
+      provider: input.provider,
+      agentName: input.agentName,
+      model: input.modelName,
+      messages: buildEphemeralMessages({
+        persona: input.activeProfilePersona,
+        mode: input.mode,
+        userMessage: `Think through this step by step, show your reasoning:\n\n${question}`,
+      }),
+    });
+    return true;
+  }
+
+  return false;
+}
+
 function getCommandSuggestions(input: string): CommandSuggestion[] {
   const normalized = input.trimStart().toLowerCase();
   if (!normalized.startsWith("/")) {
@@ -616,6 +941,106 @@ function getCommandSuggestions(input: string): CommandSuggestion[] {
   );
 
   return [...prefixMatches, ...fallbackMatches];
+}
+
+async function promptLine(question: string): Promise<string> {
+  const rl = createInterface({
+    input: stdin,
+    output: stdout,
+    terminal: true,
+  });
+
+  try {
+    return (await rl.question(question)).trim();
+  } finally {
+    rl.close();
+  }
+}
+
+async function promptYesNo(question: string): Promise<boolean> {
+  const answer = (await promptLine(question)).toLowerCase();
+  return answer === "y" || answer === "yes";
+}
+
+async function streamEphemeral(input: {
+  provider: Provider;
+  agentName: string;
+  model: string;
+  messages: ProviderMessage[];
+}): Promise<void> {
+  process.stdout.write(getTheme().accent(`${input.agentName}${PROMPT_SYMBOL} `));
+  let hadOutput = false;
+
+  for await (const token of input.provider.streamChat({
+    model: input.model ?? input.provider.defaultModel,
+    messages: input.messages,
+  })) {
+    hadOutput = true;
+    process.stdout.write(token);
+  }
+
+  if (!hadOutput) {
+    process.stdout.write("(no response)");
+  }
+
+  process.stdout.write("\n");
+  renderSeparator(EXCHANGE_SEPARATOR);
+}
+
+function buildEphemeralMessages(input: {
+  persona: string;
+  mode: ModeName;
+  systemInstruction?: string;
+  userMessage?: string;
+  history?: MessageRecord[];
+}): ProviderMessage[] {
+  const messages: ProviderMessage[] = [
+    { role: "system", content: RUNTIME_SYSTEM_GUARDRAILS },
+    { role: "system", content: input.persona },
+  ];
+
+  const modePrompt = getModeSystemPrompt(input.mode);
+  if (modePrompt) {
+    messages.push({ role: "system", content: modePrompt });
+  }
+
+  if (input.systemInstruction) {
+    messages.push({ role: "system", content: input.systemInstruction });
+  }
+
+  if (input.history) {
+    messages.push(
+      ...input.history.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+    );
+  }
+
+  if (input.userMessage) {
+    messages.push({ role: "user", content: input.userMessage });
+  }
+
+  return messages;
+}
+
+function formatConversationMarkdown(
+  messages: MessageRecord[],
+  conversationId: string,
+): string {
+  const lines = [`# Conversation ${conversationId}`, ""];
+
+  for (const message of messages) {
+    const speaker =
+      message.role === "user"
+        ? "User"
+        : message.role === "assistant"
+          ? "Hive"
+          : "System";
+    lines.push(`**${speaker}:**`, message.content, "");
+  }
+
+  return lines.join("\n");
 }
 
 async function readPromptWithSuggestions(): Promise<string> {

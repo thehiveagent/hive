@@ -10,6 +10,7 @@ import {
   MIGRATIONS,
   type AgentRecord,
   type ConversationRecord,
+  type KnowledgeRecord,
   type MessageRecord,
   type MessageRole,
   type MetaRecord,
@@ -19,6 +20,7 @@ export type HiveDatabase = Database.Database;
 export type {
   AgentRecord,
   ConversationRecord,
+  KnowledgeRecord,
   MessageRecord,
   MessageRole,
   MetaRecord,
@@ -47,9 +49,24 @@ export interface AppendMessageInput {
   content: string;
 }
 
+export interface InsertKnowledgeInput {
+  content: string;
+}
+
+export interface ListKnowledgeOptions {
+  limit?: number;
+}
+
 export interface UpdatePrimaryAgentProviderModelInput {
   provider: string;
   model: string;
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string | null;
+  updated_at: string;
+  message_count: number;
 }
 
 export const HIVE_DIRECTORY_NAME = ".hive";
@@ -84,6 +101,10 @@ export function openHiveDatabase(databasePath = getHiveDatabasePath()): HiveData
 
 export function closeHiveDatabase(db: HiveDatabase): void {
   db.close();
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
 }
 
 function configureDatabase(db: HiveDatabase): void {
@@ -147,10 +168,6 @@ function ensureAgentProfileColumns(db: HiveDatabase): void {
 
     db.exec(`ALTER TABLE agents ADD COLUMN ${column.name} ${column.definition}`);
   }
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
 }
 
 export function getMetaValue(db: HiveDatabase, key: string): string | null {
@@ -473,4 +490,116 @@ export function listMessages(
     `,
     )
     .all(conversationId, limit) as MessageRecord[];
+}
+
+export function listConversationMessages(
+  db: HiveDatabase,
+  conversationId: string,
+): MessageRecord[] {
+  return db
+    .prepare(
+      `
+      SELECT id, conversation_id, role, content, created_at
+      FROM messages
+      WHERE conversation_id = ?
+      ORDER BY datetime(created_at) ASC
+    `,
+    )
+    .all(conversationId) as MessageRecord[];
+}
+
+export function listRecentConversations(
+  db: HiveDatabase,
+  limit = 10,
+): ConversationSummary[] {
+  return db
+    .prepare(
+      `
+      SELECT
+        c.id,
+        c.title,
+        c.updated_at,
+        COUNT(m.id) AS message_count
+      FROM conversations c
+      LEFT JOIN messages m ON m.conversation_id = c.id
+      GROUP BY c.id, c.title, c.updated_at
+      ORDER BY datetime(c.updated_at) DESC
+      LIMIT ?
+    `,
+    )
+    .all(limit) as ConversationSummary[];
+}
+
+export function insertKnowledge(db: HiveDatabase, input: InsertKnowledgeInput): KnowledgeRecord {
+  const id = uuidv4();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+    INSERT INTO knowledge (id, content, created_at)
+    VALUES (?, ?, ?)
+  `,
+  ).run(id, input.content.trim(), timestamp);
+
+  return {
+    id,
+    content: input.content.trim(),
+    created_at: timestamp,
+  };
+}
+
+export function listKnowledge(
+  db: HiveDatabase,
+  options: ListKnowledgeOptions = {},
+): KnowledgeRecord[] {
+  const limit = options.limit ?? 100;
+  return db
+    .prepare(
+      `
+      SELECT id, content, created_at
+      FROM knowledge
+      ORDER BY datetime(created_at) DESC
+      LIMIT ?
+    `,
+    )
+    .all(limit) as KnowledgeRecord[];
+}
+
+export function findClosestKnowledge(db: HiveDatabase, query: string): KnowledgeRecord | null {
+  const normalized = query.trim();
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  const row = db
+    .prepare(
+      `
+      SELECT
+        id,
+        content,
+        created_at,
+        CASE WHEN content LIKE ? THEN 0 ELSE 1 END AS mismatch,
+        ABS(LENGTH(content) - ?) AS length_diff
+      FROM knowledge
+      ORDER BY mismatch ASC, length_diff ASC, datetime(created_at) DESC
+      LIMIT 1
+    `,
+    )
+    .get(`%${normalized}%`, normalized.length) as
+    | (KnowledgeRecord & { mismatch: number; length_diff: number })
+    | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    content: row.content,
+    created_at: row.created_at,
+  };
+}
+
+export function deleteKnowledge(db: HiveDatabase, id: string): void {
+  db.prepare("DELETE FROM knowledge WHERE id = ?").run(id);
 }

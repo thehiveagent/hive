@@ -8,7 +8,7 @@ export interface SchemaMigration {
   sql: string;
 }
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 const initialSchemaSql = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -76,6 +76,19 @@ ALTER TABLE agents ADD COLUMN about_raw TEXT;
 ALTER TABLE agents ADD COLUMN agent_name TEXT;
 `,
   },
+  {
+    version: 3,
+    name: "v3_knowledge_graph",
+    sql: `
+CREATE TABLE IF NOT EXISTS knowledge (
+  id TEXT PRIMARY KEY,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_created_at ON knowledge(created_at);
+`,
+  },
 ];
 
 export interface MetaRecord {
@@ -111,6 +124,12 @@ export interface MessageRecord {
   id: string;
   conversation_id: string;
   role: MessageRole;
+  content: string;
+  created_at: string;
+}
+
+export interface KnowledgeRecord {
+  id: string;
   content: string;
   created_at: string;
 }
