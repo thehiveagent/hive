@@ -1,0 +1,3 @@
+[submodule "hive-ctx"]
+	path = hive-ctx
+	url = https://github.com/thehiveagent/hive-ctx.git
