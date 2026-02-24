@@ -1,6 +1,5 @@
 import { execSync } from "node:child_process";
-import { openHiveDatabase, closeHiveDatabase, getMetaValue, setMetaValue } from "../../src/storage/db.js";
-import { isValidHexColor } from "../../src/cli/theme.js"; // or wherever it's defined. Wait, it's src/cli/theme.ts
+import { openHiveDatabase, closeHiveDatabase, getMetaValue, setMetaValue } from "../src/storage/db.js";
 
 let passed = 0;
 let failed = 0;
@@ -49,7 +48,7 @@ async function main() {
 
         // Invalid hex #ZZZZZZ — verify rejected with error (we can use isValidHexColor from theme.ts)
         try {
-            const { isValidHexColor } = await import("../../src/cli/theme.js");
+            const { isValidHexColor } = await import("../src/cli/theme.js");
             const valid = isValidHexColor("#ZZZZZZ");
             check("Invalid hex #ZZZZZZ — verify rejected with error", valid === false);
         } catch (e: any) {

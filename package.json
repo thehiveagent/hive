@@ -12,7 +12,8 @@
         "start": "node dist/cli/index.js",
         "typecheck": "tsc --noEmit",
         "lint": "eslint src/**/*.ts",
-        "clean": "rm -rf dist"
+        "clean": "rm -rf dist",
+        "test": "npx tsx scripts/test-all.ts"
     },
     "keywords": [
         "ai",

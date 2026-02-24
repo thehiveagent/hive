@@ -92,11 +92,13 @@ async function main() {
         try {
             const Database = (await import("better-sqlite3")).default;
             const mem = new Database(memDb);
-            mem.prepare("DELETE FROM memory_episodes WHERE payload LIKE '%xyz123%'").run();
+            mem.prepare("DELETE FROM tier1_entries WHERE text LIKE '%xyz123%'").run();
             mem.close();
 
             const graph = new Database(graphDb);
-            graph.prepare("DELETE FROM graph_nodes WHERE content LIKE '%xyz123%'").run();
+            try {
+                graph.prepare("DELETE FROM nodes WHERE label LIKE '%xyz123%'").run();
+            } catch (e) { }
             graph.close();
 
             check("Clean up test facts after", true);

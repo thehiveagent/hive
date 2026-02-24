@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { openHiveDatabase, closeHiveDatabase, insertKnowledge } from "../../src/storage/db.js";
+import { openHiveDatabase, closeHiveDatabase, insertKnowledge } from "../src/storage/db.js";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -52,7 +52,7 @@ async function main() {
 
         // 3. /forget test-memory-fact-xyz removes it (using closest match or delete function)
         try {
-            const { findClosestKnowledge, deleteKnowledge } = await import("../../src/storage/db.js");
+            const { findClosestKnowledge, deleteKnowledge } = await import("../src/storage/db.js");
             const fact = findClosestKnowledge(db, "test-memory-fact-xyz");
             if (fact) {
                 deleteKnowledge(db, fact.id);
@@ -86,6 +86,7 @@ async function main() {
             const { HiveCtx } = require("@imisbahk/hive-ctx");
             const ctx = new HiveCtx({ storagePath: CTX_PATH, budgetTokens: 300 });
 
+            await ctx.remember("pinned-fact-xyz", { pinned: true });
             const res = await ctx.build("anything");
             const included = res.systemPrompt.includes("pinned-fact-xyz");
             check("ctx.build(\"anything\") includes pinned fact in context", included);
@@ -96,7 +97,7 @@ async function main() {
         // 7. hive memory clear wipes episodes table
         try {
             // Just test the underlying function clearEpisodes directly, or via CLI if it supports --yes
-            const { clearEpisodes } = await import("../../src/storage/db.js");
+            const { clearEpisodes } = await import("../src/storage/db.js");
             clearEpisodes(db);
 
             const count = db.prepare("SELECT COUNT(*) as c FROM episodes").get().c;
@@ -119,7 +120,7 @@ async function main() {
         // 9. Clean up all test facts after
         if (db) {
             try {
-                const { findClosestKnowledge, deleteKnowledge } = await import("../../src/storage/db.js");
+                const { findClosestKnowledge, deleteKnowledge } = await import("../src/storage/db.js");
                 const fact = findClosestKnowledge(db, "pinned-fact-xyz");
                 if (fact) {
                     deleteKnowledge(db, fact.id);

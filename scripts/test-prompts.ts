@@ -25,11 +25,11 @@ async function main() {
         // 1. ~/.hive/prompts/ exists
         check("~/.hive/prompts/ exists", fs.existsSync(PROMPTS_DIR));
 
-        // 2. system.md present
-        // 3. memory.md present
-        // 4. behavior.md present
-        // 5. code.md present
-        const files = ["system.md", "memory.md", "behavior.md", "code.md"];
+        // 2. System.md present
+        // 3. Memory.md present
+        // 4. Behaviour.md present
+        // 5. Code.md present
+        const files = ["System.md", "Memory.md", "Behaviour.md", "Code.md"];
         for (const f of files) {
             const fp = path.join(PROMPTS_DIR, f);
             check(`${f} present`, fs.existsSync(fp));
@@ -45,7 +45,7 @@ async function main() {
 
         // 7. Template variables {name}, {agent_name} present in system.md
         try {
-            const sysContent = fs.readFileSync(path.join(PROMPTS_DIR, "system.md"), "utf8");
+            const sysContent = fs.readFileSync(path.join(PROMPTS_DIR, "System.md"), "utf8");
             check("Template variables {name}, {agent_name} present in system.md", sysContent.includes("{name}") && sysContent.includes("{agent_name}"));
         } catch (e: any) {
             check("Template variables {name}, {agent_name} present in system.md", false, e.message);

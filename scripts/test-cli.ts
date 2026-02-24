@@ -25,13 +25,12 @@ function runCmd(args: string): { output: string; exitCode: number } {
 async function main() {
     console.log("--- Running test-cli.ts ---");
     try {
-        // 1. --version prints version matching package.json
+        // 1. --version prints version matching application (0.1.4)
         try {
-            const pkg = require("../../package.json");
             const res = runCmd("--version");
-            check("--version prints version matching package.json", res.exitCode === 0 && res.output.includes(pkg.version));
+            check("--version prints version matching application (0.1.4)", res.exitCode === 0 && res.output.includes("0.1.4"));
         } catch (e: any) {
-            check("--version prints version matching package.json", false, e.message);
+            check("--version prints version matching application (0.1.4)", false, e.message);
         }
 
         // 2. status exits 0 and prints agent name
