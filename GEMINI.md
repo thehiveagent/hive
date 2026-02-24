@@ -7,7 +7,7 @@ Not a chatbot. Not a cloud product. A personal AI that lives on your machine.
 
 - **npm:** `@imisbahk/hive`
 - **org:** `github.com/thehiveagent`
-- **current version:** v0.1.6
+- **current version:** v0.1.7
 
 ## Tech stack
 - TypeScript/Node.js — CLI and agent core
@@ -22,11 +22,12 @@ Not a chatbot. Not a cloud product. A personal AI that lives on your machine.
 ```
 hive/                        ← @imisbahk/hive
   src/
-    cli/commands/            ← init, chat, config, status, doctor, nuke, memory
+    cli/commands/            ← init, chat, config, status, doctor, nuke, memory, daemon
     agent/                   ← agent.ts, prompts.ts, hive-ctx.ts
     providers/               ← one file per provider + base + resilience
     storage/                 ← db.ts (SQLite)
     browser/                 ← browser.ts (Playwright)
+    daemon/                  ← daemon processing and logic
   prompts/                   ← copied to ~/.hive/prompts/ on init
   .github/workflows/         ← publish.yml (on v* tags), ci.yml (on PRs)
 
@@ -43,6 +44,7 @@ hive-ctx/                    ← standalone package, published as `@imisbahk/hiv
 hive                  ← default entrypoint, opens chat
 hive init [--force]
 hive config provider / model / key / show / theme
+hive daemon start / stop / restart / status / logs
 hive status
 hive doctor
 hive nuke
@@ -59,7 +61,7 @@ hive --version
 /mode <name>       /export          /history
 /save <title>      /status          /retry
 /copy              /clear           /new
-/exit
+/daemon            /exit
 ...
 ```
 
@@ -74,12 +76,17 @@ hive --version
     hive_memory.sqlite
 ```
 
+## Architecture additions
+- **Daemon Layer**: A continuously running background process communicating over TCP IPC port 2718. Automatically restarts via a watcher process and stays alive unless given a sentinel stop command. Uses `launchd` (macOS), `systemd` (Linux), or Task Scheduler (Windows).
+- **Context Engine (`hive-ctx`)**: Compresses and manages context heavily (538 tokens -> 9 tokens for warm memory) using graph-based facts, layered pipeline, and multi-tier memory. Features resilient streaming and rollback handling.
+- **Testing**: A comprehensive suite of test scripts covering everything from db handling to prompt formatting.
+
 ## Roadmap (brief)
 ```
-v0.1.6    ✅ current — hive-ctx integrated, 9 token warm context
-v0.1.6.1  ⬜ fix @imisbahk/hive-ctx import
-v0.1.7    ⬜ TBD
-v0.2      ⬜ daemon, task queue, scheduling, terminal + file access
+v0.1.5    ✅ Stronger Foundation — resilient streaming, layer context pipeline
+v0.1.6    ✅ The Context Engine — hive-ctx integrated, 9 token warm context
+v0.1.7    ✅ The Agent Lives — daemon, IPC, test suite
+v0.2      ⬜ task queue, scheduling, terminal + file access
 v0.3      ⬜ code mode, Genie MCP
 v0.4      ⬜ Gmail, Calendar, Slack, WhatsApp, Telegram, GitHub
 v0.5      ⬜ local web dashboard

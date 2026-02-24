@@ -1,4 +1,4 @@
-# Commands
+# Commands (v0.1.7)
 
 This document describes the CLI commands and in-chat slash commands implemented in this repository.
 
@@ -45,6 +45,24 @@ hive chat --message "Summarize my last conversation"
 hive chat --conversation 123 --message "Continue from here"
 hive chat --model gpt-4o-mini --temperature 0.2
 hive chat --preview
+```
+
+### `hive daemon`
+
+Manage the background agent process. The daemon automatically restarts, communicates over TCP IPC on port `2718`, and uses a sentinel stop protocol so it only stops when explicitly told.
+
+Subcommands:
+- `hive daemon start`: start the daemon in the background
+- `hive daemon stop`: cleanly stop the daemon using the sentinel stop protocol
+- `hive daemon restart`: gracefully restart the daemon
+- `hive daemon status`: print current daemon status and health
+- `hive daemon logs`: tail the daemon logs
+
+Examples:
+```bash
+hive daemon start
+hive daemon status
+hive daemon stop
 ```
 
 ### `hive config`
@@ -122,6 +140,7 @@ These commands are available inside the interactive chat UI (`hive`).
 - `/exit` or `/quit`: quit chat
 - `/clear`: clear the terminal while staying in the same conversation
 - `/status`: print mode, provider, model, and conversation id inline
+- `/daemon`: print current daemon status in chat
 
 Examples:
 ```text
@@ -129,6 +148,7 @@ Examples:
 /new
 /exit
 /status
+/daemon
 /clear
 ```
 
@@ -202,3 +222,26 @@ Example:
 /mode brief
 /retry
 ```
+
+## Test Scripts
+
+The Hive includes a comprehensive test suite located in the `scripts/` directory to validate functionality.
+
+To run all tests sequentially:
+```bash
+npm run test
+# OR
+npx ts-node scripts/test-all.ts
+```
+
+Individual component tests can also be run separately:
+- `npx ts-node scripts/test-db.ts` — Tests SQLite storage and memory logic
+- `npx ts-node scripts/test-providers.ts` — Tests LLM provider reachability
+- `npx ts-node scripts/test-hive-ctx.ts` — Tests context engine integration
+- `npx ts-node scripts/test-daemon.ts` — Tests daemon lifecycle and IPC
+- `npx ts-node scripts/test-cli.ts` — Tests CLI command parsing and help output
+- `npx ts-node scripts/test-browser.ts` — Tests Playwright browser connectivity
+- `npx ts-node scripts/test-memory.ts` — Tests episodic memory and recall
+- `npx ts-node scripts/test-theme.ts` — Tests CLI UI theme configurator
+- `npx ts-node scripts/test-prompts.ts` — Tests prompt generation and defaults
+

@@ -44,14 +44,16 @@ Hive supports multiple providers for chat completions:
 - API key env var: `OLLAMA_API_KEY` (optional)
 - Base URL env var: `OLLAMA_BASE_URL` (default: `http://localhost:11434/v1`)
 - Model env var: `OLLAMA_MODEL` (default: `llama3.2`)
-- Notes: Intended for local models via an Ollama server. API key is not required. Tool-calling support depends on your Ollama version/model.
+- Notes: Intended for local models via an Ollama server. API key is not required. **Tool calling is currently disabled for Ollama due to formatting issues (will be fixed in a future version)**.
+
 
 ## Groq
 
 - API key env var: `GROQ_API_KEY` (get a key from https://console.groq.com/)
 - Base URL env var: `GROQ_BASE_URL` (default: `https://api.groq.com/openai/v1`)
 - Model env var: `GROQ_MODEL` (default: `llama-3.3-70b-versatile`)
-- Notes: Uses Groq’s OpenAI-compatible API. Supports Hive’s automatic `web_search` tool calls.
+- Notes: Uses Groq’s OpenAI-compatible API. **Tool calling is currently disabled for Groq due to formatting issues (will be fixed in a future version)**.
+
 
 ## Mistral
 

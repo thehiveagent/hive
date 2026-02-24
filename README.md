@@ -17,6 +17,9 @@ Your agent knows who you are, works for you while you sleep, connects to every t
 - A code intelligence layer powered by [Genie](https://github.com/imisbahk/genie)
 - An automation engine with OS-level capabilities
 - A distributed task network where agents work for each other
+- **A background daemon that ensures your agent is always running**
+- **An advanced context engine (`hive-ctx`)**
+- **A comprehensive test suite for high reliability**
 
 ## What It Is Not
 
@@ -24,6 +27,14 @@ Your agent knows who you are, works for you while you sleep, connects to every t
 - A cloud product
 - A subscription to someone else's infrastructure
 - Something that stops working when you close your laptop
+
+---
+
+## How it works
+
+The Hive runs a background daemon that automatically restarts. It communicates over TCP IPC on port `2718`. This daemon ensures your agent is always available to handle tasks, even when you're not interacting with it. It uses a sentinel stop protocol, meaning it only stops when explicitly told to do so.
+
+It also integrates the `hive-ctx` context engine to aggressively shrink token context. This drops warm message context significantly (e.g., 538 input tokens to 9 tokens) via its knowledge graph, 3-tier memory, and fingerprint compiler.
 
 ---
 
@@ -48,9 +59,9 @@ npm link
 ## Quickstart
 
 ```bash
-hive init      # birth your agent
+hive init      # birth your agent (asks to start daemon on boot)
 hive           # talk to it (default interactive chat)
-hive status    # see what's running
+hive status    # see what's running (includes daemon health check)
 ```
 
 `hive chat` still works as a deprecated alias.
@@ -63,13 +74,15 @@ hive status    # see what's running
 |---|---|
 | `hive` | Open interactive chat with your agent (default entrypoint) |
 | `hive init` | Create your agent. Runs once. Ever. |
+| `hive daemon` | Manage the background agent process (`start/stop/restart/status/logs`) |
 | `hive chat` | Deprecated alias for `hive` |
 | `hive config` | Update provider/model/API keys |
-| `hive status` | Health of your local node |
-| `hive nuke` | Full wipe. Gone. |
+| `hive status` | Health of your local node (including daemon) |
+| `hive doctor` | Run diagnostics (including daemon health) |
+| `hive nuke` | Full wipe. Gone. (Cleanly stops daemon first) |
 
 Inside chat, type `/` to see command suggestions (chat + Hive shortcuts).  
-Supported in-chat Hive shortcuts include `/hive status`, `/hive config show`, `/hive config provider`, `/hive config model`, `/hive config key`.
+Supported in-chat Hive shortcuts include `/hive status`, `/hive config show`, `/hive config provider`, `/hive config model`, `/hive config key`, and `/daemon`.
 
 ---
 

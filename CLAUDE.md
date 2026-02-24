@@ -4,9 +4,10 @@
 
 **Hive** — A local-first p2p AI agent CLI written in TypeScript/Node.js.
 
-- **npm package**: `@misbahk/hive`
+- **npm package**: `@imisbahk/hive`
 - **Organization**: `thehiveagent`
 - **Repository**: github.com/thehiveagent/hive
+- **Current Version**: v0.1.7
 
 ## Tech Stack
 
@@ -55,10 +56,22 @@ node dist/cli/index.js <command>  # Test locally
 - **User data location**: `~/.hive/` — never write elsewhere
 - **API keys**: Store via keytar only — never plaintext
 - **UI output**: Use `src/cli/ui.ts` — never raw chalk calls in command files
-- **Local communication**: Port `2718` for all TCP/daemon traffic
+- **Local communication**: Port `2718` for all TCP/daemon traffic. Daemon is managed via `hive daemon start/stop/restart/status/logs`
 - **Provider interface**: All providers must implement `Provider` from `src/providers/base.ts`
 - **New commands**: Add to `src/cli/commands/`, register in `src/cli/index.ts`
 - **Database access**: Use helper functions in `src/storage/db.ts` — never raw SQL in command files
+
+## Storage Layout
+
+```text
+~/.hive/
+  hive.db           # main sqlite db
+  prompts/          # loaded prompt files
+  exports/          # markdown chat exports
+  ctx/              # hive-ctx databases
+  daemon.pid        # daemon process lock
+  daemon.log        # daemon output logs
+```
 
 ## hive-ctx Submodule
 
@@ -69,7 +82,15 @@ node dist/cli/index.js <command>  # Test locally
 
 ## Testing
 
-No test suite yet. Test by running:
+A comprehensive test suite is available in `scripts/`:
+```bash
+npm run test  # Runs all tests sequentially (test-all.ts)
+```
+
+Individual component tests can also be run:
+`test-db.ts`, `test-providers.ts`, `test-hive-ctx.ts`, `test-daemon.ts`, `test-cli.ts`, `test-browser.ts`, `test-memory.ts`, `test-theme.ts`, `test-prompts.ts`
+
+Test CLI commands locally by running:
 ```bash
 node dist/cli/index.js <command>
 ```
