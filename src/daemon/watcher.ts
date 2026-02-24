@@ -136,7 +136,7 @@ function spawnDaemon(): Promise<void> {
   return new Promise((resolve, reject) => {
     logToDaemonFile("Spawning new daemon process...");
 
-    const daemonScript = path.join(path.dirname(import.meta.dirname || import.meta.url), "dist", "daemon", "index.js");
+    const daemonScript = path.join(import.meta.dirname || import.meta.url, "..", "daemon", "index.js");
 
     daemonProcess = spawn(process.execPath, [daemonScript], {
       detached: true,
