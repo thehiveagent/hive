@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createConnection } from "node:net";
 
 import chalk from "chalk";
 import { Command } from "commander";
@@ -23,6 +24,8 @@ import {
 
 const KEYCHAIN_SERVICE = "hive";
 const PROMPTS_DIRECTORY = "prompts";
+const DEFAULT_PORT = 2718;
+const TCP_TIMEOUT_MS = 3000;
 
 interface StatusCommandRenderOptions {
   showHeader?: boolean;
@@ -86,6 +89,7 @@ export async function runStatusCommandWithOptions(
     );
     renderSeparator();
     printStatusLine("Initialized", formatDate(initializedRaw));
+    printStatusLine("Daemon", await getDaemonStatusLine());
   } finally {
     closeHiveDatabase(db);
   }
@@ -167,4 +171,122 @@ function displayPath(path: string): string {
 
 function ensureTrailingSlash(path: string): string {
   return path.endsWith("/") ? path : `${path}/`;
+}
+
+/**
+ * Get daemon status line for status command
+ */
+async function getDaemonStatusLine(): Promise<string> {
+  const daemonPidFile = join(getHiveHomeDir(), "daemon.pid");
+  const daemonPortFile = join(getHiveHomeDir(), "daemon.port");
+  const daemonLockFile = join(getHiveHomeDir(), "daemon.lock");
+  const daemonWatcherPidFile = join(getHiveHomeDir(), "daemon.watcher.pid");
+
+  // Check if watcher is running
+  let watcherStatus = "stopped";
+  try {
+    const content = fs.readFileSync(daemonWatcherPidFile, "utf8").trim();
+    const pid = parseInt(content, 10);
+    if (!isNaN(pid)) {
+      process.kill(pid, 0);
+      watcherStatus = `watcher running (PID ${pid})`;
+    }
+  } catch {
+    // Watcher not running
+  }
+
+  // Check if daemon is running
+  let daemonStatus = "stopped";
+  let uptime = "n/a";
+  let daemonPort = DEFAULT_PORT;
+
+  try {
+    const content = fs.readFileSync(daemonPortFile, "utf8").trim();
+    daemonPort = parseInt(content, 10) || DEFAULT_PORT;
+  } catch {
+    // Use default
+  }
+
+  try {
+    const pidContent = fs.readFileSync(daemonPidFile, "utf8").trim();
+    const pid = parseInt(pidContent, 10);
+    if (!isNaN(pid)) {
+      process.kill(pid, 0);
+
+      // Get uptime from daemon
+      try {
+        const status = await getDaemonStatus(daemonPort);
+        if (status && typeof status.uptime === "string") {
+          uptime = status.uptime;
+        }
+        daemonStatus = `running (PID ${pid}, ${uptime})`;
+      } catch {
+        daemonStatus = `running (PID ${pid})`;
+      }
+    }
+  } catch {
+    // Daemon not running
+  }
+
+  // Heartbeat status
+  let heartbeat = "unknown";
+  try {
+    const content = fs.readFileSync(daemonLockFile, "utf8").trim();
+    const timestamp = parseInt(content, 10);
+    if (!isNaN(timestamp)) {
+      const age = Date.now() - timestamp;
+      if (age < 60000) {
+        heartbeat = `${Math.floor(age / 1000)}s ago`;
+      } else {
+        heartbeat = `${Math.floor(age / 60000)}m ago`;
+      }
+    }
+  } catch {
+    // No heartbeat file
+  }
+
+  return `${daemonStatus} | ${watcherStatus} | heartbeat: ${heartbeat}`;
+}
+
+/**
+ * Get daemon status via TCP
+ */
+function getDaemonStatus(port: number): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port }, () => {
+      socket.write(JSON.stringify({ type: "status" }) + "\n");
+    });
+
+    let buffer = "";
+    let responded = false;
+
+    socket.on("data", (data: Buffer) => {
+      if (responded) return;
+
+      buffer += data.toString();
+
+      try {
+        const response = JSON.parse(buffer);
+        responded = true;
+        socket.end();
+        resolve(response);
+      } catch {
+        // Wait for more data
+      }
+    });
+
+    socket.on("error", () => {
+      if (!responded) {
+        socket.destroy();
+        resolve(null);
+      }
+    });
+
+    socket.setTimeout(TCP_TIMEOUT_MS, () => {
+      if (!responded) {
+        socket.destroy();
+        resolve(null);
+      }
+    });
+  });
 }

@@ -1,6 +1,7 @@
 import process from "node:process";
 import * as fs from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { exec } from "node:child_process";
 
 import { Command } from "commander";
 import inquirer from "inquirer";
@@ -122,6 +123,30 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
       renderSuccess(`Agent name: ${agent.agent_name ?? "hive"}`);
       renderSuccess(`Provider: ${agent.provider}`);
       renderSuccess(`Model: ${agent.model}`);
+
+      // Ask about starting daemon
+      const { startDaemon } = (await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "startDaemon",
+          message: "Start daemon on boot? (y/n)",
+          default: true,
+        },
+      ])) as { startDaemon: boolean };
+
+      if (startDaemon) {
+        spinner.start("Starting daemon service...");
+        try {
+          await startDaemonService();
+          spinner.succeed("Daemon service started");
+        } catch (error) {
+          spinner.fail("Failed to start daemon service");
+          renderInfo(`Note: You can start the daemon manually with: hive daemon start`);
+        }
+      } else {
+        renderStep("Run `hive daemon start` to start the background daemon");
+      }
+
       renderStep("Run `hive` to start talking.");
       break;
     }
@@ -364,4 +389,144 @@ function syncPromptFiles(
   }
 
   return copiedCount;
+}
+
+/**
+ * Start the daemon service
+ */
+async function startDaemonService(): Promise<void> {
+  const installationPath = getInstallationPath();
+  const watcherPath = join(installationPath, "watcher.js");
+
+  // Install service based on platform
+  const platform = process.platform;
+  const home = process.env.HOME || require("node:os").homedir();
+
+  switch (platform) {
+    case "darwin": {
+      // macOS - Create LaunchAgent
+      const serviceDir = join(home, "Library", "LaunchAgents");
+      if (!fs.existsSync(serviceDir)) {
+        fs.mkdirSync(serviceDir, { recursive: true });
+      }
+
+      const serviceFile = join(serviceDir, "net.thehiveagent.hive-watcher.plist");
+      const plist = generateMacPlist(watcherPath);
+      fs.writeFileSync(serviceFile, plist);
+
+      // Load service
+      await execAsync(`launchctl load ${serviceFile}`);
+      break;
+    }
+
+    case "linux": {
+      // Linux - Create systemd service
+      const serviceDir = join(home, ".config", "systemd", "user");
+      if (!fs.existsSync(serviceDir)) {
+        fs.mkdirSync(serviceDir, { recursive: true });
+      }
+
+      const serviceFile = join(serviceDir, "hive-watcher.service");
+      const serviceContent = generateLinuxService(watcherPath);
+      fs.writeFileSync(serviceFile, serviceContent);
+
+      // Enable and start service
+      await execAsync("systemctl --user enable hive-watcher.service");
+      await execAsync("systemctl --user start hive-watcher.service");
+      break;
+    }
+
+    case "win32": {
+      // Windows - Create Task Scheduler task
+      const watcherPathEscaped = watcherPath.replace(/\\/g, "\\\\");
+      const username = process.env.USERNAME || process.env.USER || "SYSTEM";
+
+      const createTaskCmd = `schtasks /create /tn "HiveWatcher" /tr "node \\"${watcherPath}\\"" /sc onlogon /ru "${username}" /f`;
+      await execAsync(createTaskCmd);
+      break;
+    }
+  }
+}
+
+/**
+ * Generate macOS LaunchAgent plist
+ */
+function generateMacPlist(watcherPath: string): string {
+  const hiveHome = getHiveHomeDir();
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>net.thehiveagent.hive-watcher</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>node</string>
+        <string>${watcherPath}</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>${hiveHome}/daemon.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>${hiveHome}/daemon.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>${hiveHome}</string>
+</dict>
+</plist>`;
+}
+
+/**
+ * Generate Linux systemd service file
+ */
+function generateLinuxService(watcherPath: string): string {
+  const hiveHome = getHiveHomeDir();
+  return `[Unit]
+Description=Hive Agent Watcher
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=node ${watcherPath}
+Restart=always
+RestartSec=5
+WorkingDirectory=${hiveHome}
+StandardOutput=file:${hiveHome}/daemon.log
+StandardError=file:${hiveHome}/daemon.log
+
+[Install]
+WantedBy=default.target
+`;
+}
+
+/**
+ * Get installation path for daemon
+ */
+function getInstallationPath(): string {
+  const modulePath = import.meta.url.replace("file://", "");
+  return join(dirname(dirname(modulePath)), "daemon");
+}
+
+/**
+ * Simple exec wrapper
+ */
+function execAsync(cmd: string): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const { exec } = require("node:child_process");
+    exec(cmd, (error: Error | null, stdout: string, stderr: string) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+  });
 }

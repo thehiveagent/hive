@@ -6,6 +6,7 @@ import { Command } from "commander";
 
 import { registerChatCommand, runChatCommand } from "./commands/chat.js";
 import { registerConfigCommand } from "./commands/config.js";
+import { registerDaemonCommand } from "./commands/daemon.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerMemoryCommand } from "./commands/memory.js";
@@ -23,6 +24,7 @@ program
 registerInitCommand(program);
 registerChatCommand(program);
 registerConfigCommand(program);
+registerDaemonCommand(program);
 registerDoctorCommand(program);
 registerStatusCommand(program);
 registerNukeCommand(program);
