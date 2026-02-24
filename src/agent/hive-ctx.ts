@@ -40,11 +40,7 @@ export async function initializeHiveCtxSession(
   input: InitializeHiveCtxSessionInput,
 ): Promise<InitializeHiveCtxSessionResult> {
   try {
-    const moduleUrl = new URL(
-      "../../hive-ctx/packages/bindings/dist/index.js",
-      import.meta.url,
-    ).href;
-    const loaded = (await import(moduleUrl)) as Partial<HiveCtxModule>;
+    const loaded = (await import("@imisbahk/hive-ctx")) as Partial<HiveCtxModule>;
 
     if (typeof loaded.HiveCtx !== "function") {
       throw new Error("HiveCtx export is missing.");

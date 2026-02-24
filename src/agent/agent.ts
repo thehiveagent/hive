@@ -8,11 +8,11 @@ import {
   appendMessage,
   createConversation,
   getConversationById,
-  getMetaValue,
+  // getMetaValue,
   getPrimaryAgent,
   insertEpisode,
   listMessages,
-  setMetaValue,
+  // setMetaValue,
 } from "../storage/db.js";
 import {
   chunkText,
@@ -177,12 +177,12 @@ export class HiveAgent {
     };
 
     let assistantText = "";
-    let tokensEmitted = 0;
+    let _tokensEmitted = 0;
 
     try {
       for await (const token of this.generateAssistantReply(providerRequest)) {
         assistantText += token;
-        tokensEmitted += 1;
+        _tokensEmitted += 1;
         yield {
           type: "token",
           conversationId: conversation.id,
