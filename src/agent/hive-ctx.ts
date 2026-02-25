@@ -64,9 +64,7 @@ export async function initializeHiveCtxSession(
         async remember(fact: string, options?: { pinned?: boolean }): Promise<void> {
           if (options?.pinned) {
             try {
-              await Promise.resolve(
-                hiveCtx.remember(fact, { pinned: true }),
-              );
+              await Promise.resolve(hiveCtx.remember(fact, { pinned: true }));
               return;
             } catch {
               // Older hive-ctx versions may not support options.

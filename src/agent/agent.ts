@@ -1,9 +1,5 @@
-import type {
-  AgentRecord,
-  ConversationRecord,
-  HiveDatabase,
-} from "../storage/db.js";
-import { openPage, search, type SearchResult } from "../browser/browser.js";
+import type { AgentRecord, ConversationRecord, HiveDatabase } from "../storage/db.js";
+import type { SearchResult } from "../browser/browser.js";
 import {
   appendMessage,
   createConversation,
@@ -86,15 +82,15 @@ export interface PromptContext {
 
 export type AgentStreamEvent =
   | {
-    type: "token";
-    conversationId: string;
-    token: string;
-  }
+      type: "token";
+      conversationId: string;
+      token: string;
+    }
   | {
-    type: "done";
-    conversationId: string;
-    assistantMessageId: string;
-  };
+      type: "done";
+      conversationId: string;
+      assistantMessageId: string;
+    };
 
 export class HiveAgent {
   private readonly historyLimit = 80;
@@ -103,7 +99,7 @@ export class HiveAgent {
     private readonly db: HiveDatabase,
     private readonly provider: Provider,
     private readonly agent: AgentRecord,
-  ) { }
+  ) {}
 
   static async load(db: HiveDatabase, provider?: Provider): Promise<HiveAgent> {
     const agent = getPrimaryAgent(db);
@@ -145,19 +141,20 @@ export class HiveAgent {
 
     const history = listMessages(this.db, conversation.id, this.historyLimit);
     const contextSystemPrompt = options.contextSystemPrompt?.trim();
-    const systemMessages = contextSystemPrompt && contextSystemPrompt.length > 0
-      ? [
-        {
-          role: "system" as const,
-          content: mergeSystemPrompts([contextSystemPrompt, options.systemAddition]),
-        },
-      ]
-      : buildPromptContext({
-        agent: this.agent,
-        db: this.db,
-        userPrompt: trimmed,
-        modeAddition: options.systemAddition,
-      }).systemMessages;
+    const systemMessages =
+      contextSystemPrompt && contextSystemPrompt.length > 0
+        ? [
+            {
+              role: "system" as const,
+              content: mergeSystemPrompts([contextSystemPrompt, options.systemAddition]),
+            },
+          ]
+        : buildPromptContext({
+            agent: this.agent,
+            db: this.db,
+            userPrompt: trimmed,
+            modeAddition: options.systemAddition,
+          }).systemMessages;
 
     const providerRequest: StreamChatRequest = {
       model: options.model ?? this.agent.model,
@@ -237,10 +234,7 @@ export class HiveAgent {
     insertEpisode(this.db, trimmed);
   }
 
-  private resolveConversation(
-    conversationId?: string,
-    title?: string,
-  ): ConversationRecord {
+  private resolveConversation(conversationId?: string, title?: string): ConversationRecord {
     if (!conversationId) {
       return createConversation(this.db, {
         agentId: this.agent.id,
@@ -275,9 +269,7 @@ export class HiveAgent {
     yield* chunkText(assistantText);
   }
 
-  private async completeWithAutomaticTools(
-    providerRequest: StreamChatRequest,
-  ): Promise<string> {
+  private async completeWithAutomaticTools(providerRequest: StreamChatRequest): Promise<string> {
     const completeChat = this.provider.completeChat;
     if (!completeChat) {
       let fallbackText = "";
@@ -321,9 +313,7 @@ export class HiveAgent {
     return "I could not complete all required tool calls. Please try again.";
   }
 
-  private async *streamWithRetry(
-    providerRequest: StreamChatRequest,
-  ): AsyncGenerator<string> {
+  private async *streamWithRetry(providerRequest: StreamChatRequest): AsyncGenerator<string> {
     const maxAttempts = 2;
     let attempts = 0;
     let tokensSeen = 0;
@@ -416,7 +406,7 @@ export function buildDefaultPersona(ownerName: string, agentName?: string): stri
     "",
     "You are not a chatbot. You are not an assistant. You are an agent.",
     "You think, remember, act, and grow. You are direct, sharp, and human.",
-    "You don't pad responses. You don't say \"Certainly!\" or \"Great question!\"",
+    'You don\'t pad responses. You don\'t say "Certainly!" or "Great question!"',
     `You talk like someone who knows ${ownerName} well and genuinely gives a damn.`,
     "",
     "You remember everything that matters. You notice patterns.",
@@ -462,9 +452,7 @@ export async function buildBrowserAugmentedPrompt(
   });
 }
 
-export async function handleBrowseSlashCommand(
-  userPrompt: string,
-): Promise<string | null> {
+export async function handleBrowseSlashCommand(userPrompt: string): Promise<string | null> {
   const match = userPrompt.trim().match(BROWSE_COMMAND_PATTERN);
   if (!match) {
     return null;
@@ -546,7 +534,8 @@ function buildUntrustedContextMessage(input: {
 
 async function safelyOpenPage(url: string): Promise<string> {
   try {
-    return await openPage(url);
+    const browser = await loadBrowser();
+    return await browser.openPage(url);
   } catch (error) {
     return `Unable to read that page right now. ${errorMessage(error)}`;
   }
@@ -554,10 +543,22 @@ async function safelyOpenPage(url: string): Promise<string> {
 
 async function safelySearch(query: string): Promise<SearchResult[] | string> {
   try {
-    return await search(query);
+    const browser = await loadBrowser();
+    return await browser.search(query);
   } catch (error) {
     return `Unable to search the web right now. ${errorMessage(error)}`;
   }
+}
+
+async function loadBrowser(): Promise<{
+  openPage: (url: string) => Promise<string>;
+  search: (query: string) => Promise<SearchResult[]>;
+}> {
+  const browser = (await import("../browser/browser.js")) as {
+    openPage: (url: string) => Promise<string>;
+    search: (query: string) => Promise<SearchResult[]>;
+  };
+  return browser;
 }
 
 function formatSearchResults(results: SearchResult[] | string): string {
@@ -710,7 +711,10 @@ function stripUnhelpfulCapabilityClaims(value: string): string {
     .map((line) => line.trimEnd())
     .filter((line) => !NO_BROWSE_CLAIM_PATTERN.test(line) && !TOOL_PROMPTING_PATTERN.test(line));
 
-  return cleanedLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return cleanedLines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 async function callWithTransientRetry<T>(operation: () => Promise<T>): Promise<T> {

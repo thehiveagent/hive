@@ -16,6 +16,7 @@ All agent data — persona, episodic memory, knowledge graph, task history, audi
 The Hive's core promise is that your agent is yours. Completely. That promise breaks the moment user data touches an external server we control.
 
 SQLite is:
+
 - Fast enough for everything we need
 - Zero dependency — ships as a single file
 - Battle-tested at massive scale

@@ -21,7 +21,7 @@ const CRYSTALLIZED_SOURCE = "auto_crystallized";
 const EXTRACTION_SYSTEM_PROMPT =
   "Extract any personal facts, preferences, goals, or notable information about the user from this conversation. Return as JSON array of strings. If nothing notable, return empty array. Be selective — only extract durable facts, not temporary context.";
 const EMOTION_SYSTEM_PROMPT =
-  "Identify any emotional state or mood the user expresses in this exchange. Return a single short phrase (e.g., \"anxious about work\") or an empty string if none.";
+  'Identify any emotional state or mood the user expresses in this exchange. Return a single short phrase (e.g., "anxious about work") or an empty string if none.';
 const CRYSTALLIZE_SYSTEM_PROMPT =
   "Based on these conversations, what are the most important things to know about this person long term? What are their patterns, goals, values, and preferences? Return as JSON array.";
 const MAX_HISTORY_FOR_DUP_CHECK = 500;
@@ -88,16 +88,29 @@ async function extractAndStoreFacts(input: {
   model: string;
   exchange: string;
 }): Promise<void> {
-  const facts = await completeJsonArray(input.provider, input.model, EXTRACTION_SYSTEM_PROMPT, input.exchange);
+  const facts = await completeJsonArray(
+    input.provider,
+    input.model,
+    EXTRACTION_SYSTEM_PROMPT,
+    input.exchange,
+  );
   if (!Array.isArray(facts) || facts.length === 0) {
     return;
   }
 
   for (const raw of facts) {
-    if (typeof raw !== "string") continue;
+    if (typeof raw !== "string") {
+      continue;
+    }
     const fact = raw.trim();
-    if (!fact || hasSimilarKnowledge(input.db, fact)) continue;
-    insertKnowledge(input.db, { content: fact, pinned: false, source: AUTO_SOURCE });
+    if (!fact || hasSimilarKnowledge(input.db, fact)) {
+      continue;
+    }
+    insertKnowledge(input.db, {
+      content: fact,
+      pinned: false,
+      source: AUTO_SOURCE,
+    });
   }
 }
 
@@ -107,16 +120,27 @@ async function extractAndStoreEmotion(input: {
   exchange: string;
   hiveCtx: HiveCtxSession | null;
 }): Promise<void> {
-  if (!input.hiveCtx) return;
-  const result = await completeSingleString(input.provider, input.model, EMOTION_SYSTEM_PROMPT, input.exchange);
+  if (!input.hiveCtx) {
+    return;
+  }
+  const result = await completeSingleString(
+    input.provider,
+    input.model,
+    EMOTION_SYSTEM_PROMPT,
+    input.exchange,
+  );
   const mood = result.trim();
-  if (!mood) return;
+  if (!mood) {
+    return;
+  }
   await Promise.resolve(input.hiveCtx.remember(mood)).catch(() => {});
 }
 
 async function crystallizeEveryTen(input: PassiveMemoryInput): Promise<void> {
   const episodes = listEpisodes(input.db, 20).slice(0, 10);
-  if (episodes.length === 0) return;
+  if (episodes.length === 0) {
+    return;
+  }
 
   const summaries = episodes.map((episode) => episode.content).join("\n---\n");
   const crystals = await completeJsonArray(
@@ -131,10 +155,18 @@ async function crystallizeEveryTen(input: PassiveMemoryInput): Promise<void> {
   }
 
   for (const raw of crystals) {
-    if (typeof raw !== "string") continue;
+    if (typeof raw !== "string") {
+      continue;
+    }
     const fact = raw.trim();
-    if (!fact || hasSimilarKnowledge(input.db, fact)) continue;
-    insertKnowledge(input.db, { content: fact, pinned: true, source: CRYSTALLIZED_SOURCE });
+    if (!fact || hasSimilarKnowledge(input.db, fact)) {
+      continue;
+    }
+    insertKnowledge(input.db, {
+      content: fact,
+      pinned: true,
+      source: CRYSTALLIZED_SOURCE,
+    });
     if (input.hiveCtx) {
       await Promise.resolve(input.hiveCtx.remember(fact, { pinned: true })).catch(() => {});
     }
@@ -143,7 +175,9 @@ async function crystallizeEveryTen(input: PassiveMemoryInput): Promise<void> {
 
 function hasSimilarKnowledge(db: HiveDatabase, fact: string): boolean {
   const terms = tokenize(fact);
-  if (terms.size === 0) return false;
+  if (terms.size === 0) {
+    return false;
+  }
 
   const rows = listKnowledge(db, { limit: MAX_HISTORY_FOR_DUP_CHECK });
   for (const row of rows) {
@@ -168,7 +202,9 @@ function tokenize(text: string): Set<string> {
 function countOverlap(a: Set<string>, b: Set<string>): number {
   let count = 0;
   for (const term of a) {
-    if (b.has(term)) count += 1;
+    if (b.has(term)) {
+      count += 1;
+    }
   }
   return count;
 }
@@ -253,8 +289,7 @@ function logBackgroundError(error: unknown): void {
     mkdirSync(hiveHome, { recursive: true });
     const logPath = join(hiveHome, "daemon.log");
     const timestamp = new Date().toISOString();
-    const message =
-      error instanceof Error ? error.stack ?? error.message : String(error);
+    const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
     appendFileSync(logPath, `[${timestamp}] passive-memory error: ${message}\n`);
   } catch {
     // Swallow logging failures silently.

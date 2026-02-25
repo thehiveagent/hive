@@ -7,11 +7,11 @@
 - **npm package**: `@imisbahk/hive`
 - **Organization**: `thehiveagent`
 - **Repository**: github.com/thehiveagent/hive
-- **Current Version**: v0.1.7
+- **Current Version**: v0.1.8
 
 ## Tech Stack
 
-- **Node**: 20 LTS strictly
+- **Node**: >=18 (recommended 20+)
 - **TypeScript**: ESM (ES Modules)
 - **Database**: better-sqlite3
 - **Secrets**: keytar
@@ -46,6 +46,7 @@ npm install           # Install dependencies
 npm run build         # Compile TypeScript
 npm run typecheck     # Type check only
 npm run lint          # Lint code
+npm run format        # Prettier format
 node dist/cli/index.js <command>  # Test locally
 
 # NEVER use `hive` directly during development
@@ -84,11 +85,11 @@ node dist/cli/index.js <command>  # Test locally
 
 A comprehensive test suite is available in `scripts/`:
 ```bash
-npm run test  # Runs all tests sequentially (test-all.ts)
+npm run test  # Runs all tests sequentially (scripts/test-all.js)
 ```
 
 Individual component tests can also be run:
-`test-db.ts`, `test-providers.ts`, `test-hive-ctx.ts`, `test-daemon.ts`, `test-cli.ts`, `test-browser.ts`, `test-memory.ts`, `test-theme.ts`, `test-prompts.ts`
+`test-db.js`, `test-providers.js`, `test-hive-ctx.js`, `test-daemon.js`, `test-cli.js`, `test-browser.js`, `test-memory.js`, `test-theme.js`, `test-prompts.js`
 
 Test CLI commands locally by running:
 ```bash

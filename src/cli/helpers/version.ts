@@ -4,15 +4,14 @@ import { readFileSync } from "node:fs";
 const REGISTRY_LATEST_URL = "https://registry.npmjs.org/@imisbahk/hive/latest";
 
 export async function fetchLatestVersion(timeoutMs = 3000): Promise<string | null> {
+  let timeout: NodeJS.Timeout | null = null;
   try {
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("timeout")), timeoutMs),
-    );
+    const controller = new AbortController();
+    timeout = setTimeout(() => controller.abort(), timeoutMs);
+    timeout.unref?.();
 
-    const latest = (await Promise.race([
-      fetch(REGISTRY_LATEST_URL).then((response) => response.json()),
-      timeout,
-    ])) as { version?: string } | undefined;
+    const response = await fetch(REGISTRY_LATEST_URL, { signal: controller.signal });
+    const latest = (await response.json()) as { version?: string } | undefined;
 
     if (!latest?.version || typeof latest.version !== "string") {
       return null;
@@ -21,6 +20,10 @@ export async function fetchLatestVersion(timeoutMs = 3000): Promise<string | nul
     return latest.version;
   } catch {
     return null;
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
   }
 }
 
@@ -60,7 +63,8 @@ export function isMinorJump(remote: string, local: string): boolean {
     return true;
   }
 
-  return rMajor === lMajor && rMinor >= (lMinor + 1);
+  // Only nag if more than one minor release behind (e.g. 0.1.x -> 0.3.x).
+  return rMajor === lMajor && rMinor >= lMinor + 2;
 }
 
 function toNumbers(value: string): number[] {

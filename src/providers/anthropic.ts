@@ -32,9 +32,7 @@ export class AnthropicProvider implements Provider {
 
   async *streamChat(request: StreamChatRequest): AsyncGenerator<string> {
     if (!this.apiKey) {
-      throw new ProviderConfigurationError(
-        'Provider "anthropic" is missing ANTHROPIC_API_KEY.',
-      );
+      throw new ProviderConfigurationError('Provider "anthropic" is missing ANTHROPIC_API_KEY.');
     }
 
     const system = request.messages
@@ -81,9 +79,7 @@ export class AnthropicProvider implements Provider {
       if (payload.type === "error") {
         const error = payload.error as Record<string, unknown> | undefined;
         const message =
-          typeof error?.message === "string"
-            ? error.message
-            : "anthropic stream error";
+          typeof error?.message === "string" ? error.message : "anthropic stream error";
 
         throw new ProviderRequestError(message);
       }

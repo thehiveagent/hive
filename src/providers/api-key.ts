@@ -15,9 +15,5 @@ export async function resolveProviderApiKey(
     keychainValue = null;
   }
 
-  return (
-    keychainValue ??
-    process.env[envVarName] ??
-    undefined
-  );
+  return keychainValue ?? process.env[envVarName] ?? undefined;
 }

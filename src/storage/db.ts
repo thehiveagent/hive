@@ -136,9 +136,9 @@ function ensureMigrationTable(db: HiveDatabase): void {
 export function runMigrations(db: HiveDatabase): void {
   ensureMigrationTable(db);
 
-  const appliedRows = db
-    .prepare("SELECT version FROM schema_migrations")
-    .all() as Array<{ version: number }>;
+  const appliedRows = db.prepare("SELECT version FROM schema_migrations").all() as Array<{
+    version: number;
+  }>;
   const appliedVersions = new Set(appliedRows.map((row) => row.version));
 
   for (const migration of MIGRATIONS) {
@@ -181,9 +181,9 @@ function ensureAgentProfileColumns(db: HiveDatabase): void {
 }
 
 export function getMetaValue(db: HiveDatabase, key: string): string | null {
-  const row = db
-    .prepare("SELECT key, value, updated_at FROM meta WHERE key = ?")
-    .get(key) as MetaRecord | undefined;
+  const row = db.prepare("SELECT key, value, updated_at FROM meta WHERE key = ?").get(key) as
+    | MetaRecord
+    | undefined;
 
   return row?.value ?? null;
 }
@@ -201,9 +201,7 @@ export function setMetaValue(db: HiveDatabase, key: string, value: string): void
 }
 
 export function isHiveInitialized(db: HiveDatabase): boolean {
-  const row = db
-    .prepare("SELECT COUNT(1) as count FROM agents")
-    .get() as { count: number };
+  const row = db.prepare("SELECT COUNT(1) as count FROM agents").get() as { count: number };
 
   return row.count > 0;
 }
@@ -235,10 +233,7 @@ export function getPrimaryAgent(db: HiveDatabase): AgentRecord | null {
   return row ?? null;
 }
 
-export function upsertPrimaryAgent(
-  db: HiveDatabase,
-  input: UpsertAgentInput,
-): AgentRecord {
+export function upsertPrimaryAgent(db: HiveDatabase, input: UpsertAgentInput): AgentRecord {
   const existing = getPrimaryAgent(db);
   const timestamp = nowIso();
 
@@ -350,10 +345,7 @@ export function updatePrimaryAgentProviderAndModel(
   return updatePrimaryAgentConfiguration(db, existing, input.provider, input.model);
 }
 
-export function updatePrimaryAgentModel(
-  db: HiveDatabase,
-  model: string,
-): AgentRecord {
+export function updatePrimaryAgentModel(db: HiveDatabase, model: string): AgentRecord {
   const existing = getPrimaryAgent(db);
   if (!existing) {
     throw new Error("Hive is not initialized. Run `hive init` first.");
@@ -473,10 +465,7 @@ export function getLatestConversationForAgent(
   return row ?? null;
 }
 
-export function appendMessage(
-  db: HiveDatabase,
-  input: AppendMessageInput,
-): MessageRecord {
+export function appendMessage(db: HiveDatabase, input: AppendMessageInput): MessageRecord {
   const id = uuidv4();
   const timestamp = nowIso();
 
@@ -546,10 +535,7 @@ export function listConversationMessages(
     .all(conversationId) as MessageRecord[];
 }
 
-export function listRecentConversations(
-  db: HiveDatabase,
-  limit = 10,
-): ConversationSummary[] {
+export function listRecentConversations(db: HiveDatabase, limit = 10): ConversationSummary[] {
   return db
     .prepare(
       `
@@ -754,11 +740,7 @@ export function findRelevantEpisodes(
       return { episode, score };
     })
     .filter((item) => item.score > 0)
-    .sort(
-      (a, b) =>
-        b.score - a.score ||
-        b.episode.created_at.localeCompare(a.episode.created_at),
-    );
+    .sort((a, b) => b.score - a.score || b.episode.created_at.localeCompare(a.episode.created_at));
 
   return scored.slice(0, limit);
 }

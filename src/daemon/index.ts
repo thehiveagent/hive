@@ -14,20 +14,18 @@ import "dotenv/config";
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createServer, type Socket } from "node:net";
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
-import { getHiveHomeDir, getPrimaryAgent, openHiveDatabase, closeHiveDatabase } from "../storage/db.js";
+import { createServer, type Server, type Socket } from "node:net";
+import {
+  closeHiveDatabase,
+  getHiveHomeDir,
+  getPrimaryAgent,
+  openHiveDatabase,
+  type HiveDatabase,
+} from "../storage/db.js";
 import { initializeHiveCtxSession } from "../agent/hive-ctx.js";
-import type { Provider } from "../providers/base.js";
-import { createProvider } from "../providers/index.js";
-
-const execAsync = promisify(exec);
 
 const PORT = 2718;
-const HEARTBEAT_INTERVAL_MS = 30000; // 30 seconds
-const WATCHER_CHECK_INTERVAL_MS = 60000; // 60 seconds
-const STALE_THRESHOLD_MS = 90000; // 90 seconds
+const HEARTBEAT_INTERVAL_MS = readEnvNumber("HIVE_DAEMON_HEARTBEAT_MS", 30000, 250); // 30s default
 const LOG_MAX_SIZE = 10 * 1024 * 1024; // 10MB
 const LOG_MAX_FILES = 3;
 
@@ -39,18 +37,25 @@ const DAEMON_LOG_FILE = path.join(HIVE_HOME, "daemon.log");
 const DAEMON_STOP_SENTINEL = path.join(HIVE_HOME, "daemon.stop");
 const DAEMON_CTX_PATH = path.join(HIVE_HOME, "ctx");
 
-// Log rotation state
-let currentLogSize = 0;
-let logBuffer = "";
-
 // Daemon state
 let startTime: number;
-let db: any = null;
-let provider: Provider | null = null;
-let agent: any = null;
-let ctxSession: any = null;
-let tcpServer: any = null;
+let db: HiveDatabase | null = null;
+let agent: ReturnType<typeof getPrimaryAgent> | null = null;
+let ctxSession: unknown | null = null;
+let tcpServer: Server | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
+
+function readEnvNumber(name: string, fallback: number, min: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < min) {
+    return fallback;
+  }
+  return parsed;
+}
 
 /**
  * Log to file with rotation
@@ -157,20 +162,12 @@ async function initializeDaemon(): Promise<void> {
   logToDaemonFile("Loading agent profile...");
   agent = getPrimaryAgent(db);
   if (!agent) {
-    logToDaemonFile("Warning: No agent profile found. Daemon will start but agent features unavailable.");
+    logToDaemonFile(
+      "Warning: No agent profile found. Daemon will start but agent features unavailable.",
+    );
   }
 
   // Initialize provider
-  if (agent) {
-    try {
-      logToDaemonFile(`Initializing provider: ${agent.provider}...`);
-      provider = await createProvider(agent.provider);
-    } catch (error) {
-      logToDaemonFile(`Warning: Failed to initialize provider: ${error}`);
-    }
-  }
-
-  // Initialize hive-ctx
   if (agent) {
     try {
       logToDaemonFile("Initializing hive-ctx...");
@@ -226,7 +223,9 @@ function handleConnection(socket: Socket): void {
       const line = buffer.slice(0, lineEnd).trim();
       buffer = buffer.slice(lineEnd + 1);
 
-      if (line.length === 0) continue;
+      if (line.length === 0) {
+        continue;
+      }
 
       handleCommand(line, socket);
     }
@@ -269,7 +268,7 @@ function handleCommand(command: string, socket: Socket): void {
       default:
         sendResponse(socket, { error: `Unknown command type: ${parsed.type}` });
     }
-  } catch (error) {
+  } catch {
     sendResponse(socket, { error: "Invalid JSON" });
   }
 }
@@ -287,8 +286,12 @@ function handleStatus(socket: Socket): void {
 
   if (db) {
     try {
-      const episodeCount = db.prepare("SELECT COUNT(*) as count FROM episodes").get() as { count: number };
-      const conversationCount = db.prepare("SELECT COUNT(*) as count FROM conversations").get() as { count: number };
+      const episodeCount = db.prepare("SELECT COUNT(*) as count FROM episodes").get() as {
+        count: number;
+      };
+      const conversationCount = db.prepare("SELECT COUNT(*) as count FROM conversations").get() as {
+        count: number;
+      };
       memoryStats = {
         episodes: episodeCount.count,
         conversations: conversationCount.count,
@@ -368,9 +371,10 @@ function sendResponse(socket: Socket, data: Record<string, unknown>): void {
  */
 async function startTcpServer(): Promise<void> {
   return new Promise((resolve, reject) => {
-    tcpServer = createServer(handleConnection);
+    const server = createServer(handleConnection);
+    tcpServer = server;
 
-    tcpServer.on("error", (error: Error) => {
+    server.on("error", (error: Error) => {
       logToDaemonFile(`TCP server error: ${error.message}`);
       reject(error);
     });
@@ -379,22 +383,22 @@ async function startTcpServer(): Promise<void> {
     let currentPort = PORT;
 
     const bindNextPort = () => {
-      tcpServer.listen(currentPort, "127.0.0.1", () => {
+      server.listen(currentPort, "127.0.0.1", () => {
         writePortFile(currentPort);
         logToDaemonFile(`TCP server listening on 127.0.0.1:${currentPort}`);
         resolve();
       });
     };
 
-    tcpServer.on("listening", () => {
+    server.on("listening", () => {
       // Port is already written in the callback above
     });
 
-    tcpServer.on("error", (error: any) => {
+    server.on("error", (error: any) => {
       if (error.code === "EADDRINUSE") {
         logToDaemonFile(`Port ${currentPort} in use, trying ${currentPort + 1}...`);
         currentPort += 1;
-        tcpServer.close();
+        server.close();
         bindNextPort();
       } else {
         reject(error);

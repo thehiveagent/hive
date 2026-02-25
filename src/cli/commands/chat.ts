@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { join } from "node:path";
 import { stdin, stdout } from "node:process";
 import * as readline from "node:readline";
@@ -15,10 +16,7 @@ import {
   HiveAgent,
 } from "../../agent/agent.js";
 import { schedulePassiveMemory } from "../../agent/passive-memory.js";
-import {
-  initializeHiveCtxSession,
-  type HiveCtxSession,
-} from "../../agent/hive-ctx.js";
+import { initializeHiveCtxSession, type HiveCtxSession } from "../../agent/hive-ctx.js";
 import { maybeAutoUpdatePromptsOnBoot } from "../../agent/prompt-auto-update.js";
 import {
   closeHiveDatabase,
@@ -52,7 +50,6 @@ import {
   isMinorJump,
   isVersionNewer,
 } from "../helpers/version.js";
-import { openPage } from "../../browser/browser.js";
 import {
   runConfigKeyCommandWithOptions,
   runConfigModelCommandWithOptions,
@@ -100,6 +97,7 @@ const COMMAND_HELP_TEXT = [
   "Commands:",
   "  /help           show commands",
   "  /new            start a new conversation",
+  "  /daemon         show daemon status",
   "  /remember <fact> save a fact",
   "  /forget <thing>  delete closest fact",
   "  /pin <fact>      pin fact into context",
@@ -178,6 +176,11 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
     label: "/new",
     insertText: "/new",
     description: "start a new conversation",
+  },
+  {
+    label: "/daemon",
+    insertText: "/daemon",
+    description: "show daemon status",
   },
   {
     label: "/remember <fact>",
@@ -352,7 +355,10 @@ export async function runChatCommand(
 ): Promise<void> {
   console.clear();
   renderHiveHeader("Chat");
-  void checkForUpdates();
+  // Only check for updates in interactive chat. One-shot runs should exit fast.
+  if (!options.preview && !options.message) {
+    void checkForUpdates();
+  }
 
   const entrypoint = context.entrypoint ?? "chat-command";
   if (entrypoint === "chat-command") {
@@ -366,6 +372,7 @@ export async function runChatCommand(
 
   const temperature = parseTemperature(options.temperature);
   const db = openHiveDatabase();
+  let exitRequested = false;
 
   try {
     const profile = getPrimaryAgent(db);
@@ -374,7 +381,7 @@ export async function runChatCommand(
       return;
     }
 
-    await maybeAutoUpdatePromptsOnBoot(db, (message) => {
+    void maybeAutoUpdatePromptsOnBoot(db, (message) => {
       console.log(chalk.dim(message));
     });
 
@@ -462,6 +469,7 @@ export async function runChatCommand(
       }
 
       if (normalizedPrompt === "/exit" || normalizedPrompt === "/quit") {
+        exitRequested = true;
         break;
       }
 
@@ -578,6 +586,32 @@ export async function runChatCommand(
   } finally {
     closeHiveDatabase(db);
   }
+
+  if (exitRequested) {
+    // readPromptWithSuggestions does not use a readline interface in TTY mode, so we
+    // explicitly pause stdin and exit to avoid a dangling process.
+    process.stdout.write("\n");
+    stdin.pause();
+    await attemptBrowserShutdown();
+    process.exit(0);
+  }
+}
+
+async function attemptBrowserShutdown(): Promise<void> {
+  // Only pay the cost if the browser module was ever loaded.
+  try {
+    const browser = (await import("../../browser/browser.js")) as Partial<{
+      closeBrowser: () => Promise<void>;
+    }>;
+    if (typeof browser.closeBrowser === "function") {
+      await Promise.race([
+        browser.closeBrowser(),
+        new Promise<void>((resolve) => setTimeout(resolve, 200)),
+      ]);
+    }
+  } catch {
+    // ignore
+  }
 }
 
 interface StreamResult {
@@ -585,20 +619,18 @@ interface StreamResult {
   assistantText: string;
 }
 
-async function streamReply(
-  input: {
-    agent: HiveAgent;
-    provider: Provider;
-    db: HiveDatabase;
-    prompt: string;
-    rawPrompt: string;
-    conversationId: string | undefined;
-    options: RunChatOptions;
-    agentName: string;
-    systemAddition?: string;
-    hiveCtx: HiveCtxSession | null;
-  },
-): Promise<StreamResult> {
+async function streamReply(input: {
+  agent: HiveAgent;
+  provider: Provider;
+  db: HiveDatabase;
+  prompt: string;
+  rawPrompt: string;
+  conversationId: string | undefined;
+  options: RunChatOptions;
+  agentName: string;
+  systemAddition?: string;
+  hiveCtx: HiveCtxSession | null;
+}): Promise<StreamResult> {
   const theme = getTheme();
   process.stdout.write(theme.accent(`${input.agentName}${PROMPT_SYMBOL} `));
 
@@ -720,8 +752,8 @@ function formatError(error: unknown): string {
 }
 
 function renderAmberError(message: string): void {
-  const accent = getTheme().accent;
-  console.error(accent(`✗ ${message}`));
+  const amber = chalk.hex("#ffbf00");
+  console.error(amber(`✗ ${message}`));
 }
 
 function resolveAgentName(agentName: string | null | undefined): string {
@@ -733,11 +765,7 @@ function resolveAgentName(agentName: string | null | undefined): string {
   return "hive";
 }
 
-function renderChatPreamble(input: {
-  agentName: string;
-  provider: string;
-  model: string;
-}): void {
+function renderChatPreamble(input: { agentName: string; provider: string; model: string }): void {
   renderInfo(`${input.agentName} · ${input.provider} · ${input.model}`);
   renderInfo(CHAT_HINT_TEXT);
 }
@@ -837,6 +865,7 @@ function isUnknownSlashCommand(prompt: string): boolean {
   if (
     normalized === "/help" ||
     normalized === "/new" ||
+    normalized === "/daemon" ||
     normalized === "/exit" ||
     normalized === "/quit" ||
     normalized === "/remember" ||
@@ -870,6 +899,112 @@ function isUnknownSlashCommand(prompt: string): boolean {
   }
 
   return true;
+}
+
+async function getDaemonStatusLineInline(): Promise<string> {
+  const home = getHiveHomeDir();
+  const portFile = join(home, "daemon.port");
+  const pidFile = join(home, "daemon.pid");
+  const watcherPidFile = join(home, "daemon.watcher.pid");
+  const lockFile = join(home, "daemon.lock");
+
+  const port = readNumberFromFile(portFile) ?? 2718;
+  const pid = readNumberFromFile(pidFile);
+  const watcherPid = readNumberFromFile(watcherPidFile);
+
+  const watcherRunning =
+    watcherPid !== null && isProcessRunning(watcherPid)
+      ? `watcher PID ${watcherPid}`
+      : "watcher stopped";
+
+  const live = await getDaemonStatusViaTcp(port);
+  if (live) {
+    const livePid = typeof live.pid === "number" ? live.pid : pid;
+    const uptime = typeof live.uptime === "string" ? live.uptime : "n/a";
+    return `daemon running${livePid ? ` (PID ${livePid}, ${uptime})` : ""} · ${watcherRunning}`;
+  }
+
+  const heartbeat = getHeartbeatAge(lockFile);
+  if (pid !== null && isProcessRunning(pid)) {
+    return `daemon running (PID ${pid}) · ${watcherRunning} · heartbeat: ${heartbeat}`;
+  }
+
+  return `daemon stopped · ${watcherRunning}`;
+}
+
+function readNumberFromFile(path: string): number | null {
+  try {
+    const raw = readFileSync(path, "utf8").trim();
+    const value = Number.parseInt(raw, 10);
+    return Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getHeartbeatAge(lockFile: string): string {
+  const lockTime = readNumberFromFile(lockFile);
+  if (lockTime === null) {
+    return "unknown";
+  }
+  const ageMs = Date.now() - lockTime;
+  if (!Number.isFinite(ageMs) || ageMs < 0) {
+    return "unknown";
+  }
+  if (ageMs < 60_000) {
+    return `${Math.floor(ageMs / 1000)}s ago`;
+  }
+  return `${Math.floor(ageMs / 60_000)}m ago`;
+}
+
+function getDaemonStatusViaTcp(port: number): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port }, () => {
+      socket.write(JSON.stringify({ type: "status" }) + "\n");
+    });
+
+    let buffer = "";
+    let responded = false;
+
+    socket.on("data", (data: Buffer) => {
+      if (responded) {
+        return;
+      }
+
+      buffer += data.toString();
+      try {
+        const response = JSON.parse(buffer) as Record<string, unknown>;
+        responded = true;
+        socket.end();
+        resolve(response);
+      } catch {
+        // wait for more data
+      }
+    });
+
+    socket.on("error", () => {
+      if (!responded) {
+        socket.destroy();
+        resolve(null);
+      }
+    });
+
+    socket.setTimeout(500, () => {
+      if (!responded) {
+        socket.destroy();
+        resolve(null);
+      }
+    });
+  });
 }
 
 async function handleHiveShortcut(
@@ -958,9 +1093,7 @@ async function handleHiveShortcut(
       return "handled";
     }
 
-    const confirmed = await promptYesNo(
-      "This will delete all episodic memories. Continue? (y/n) ",
-    );
+    const confirmed = await promptYesNo("This will delete all episodic memories. Continue? (y/n) ");
     if (!confirmed) {
       renderInfo("Cancelled.");
       return "handled";
@@ -1032,10 +1165,7 @@ async function handleHiveShortcut(
     return "handled";
   }
 
-  if (
-    subcommand === "init" ||
-    subcommand === "nuke"
-  ) {
+  if (subcommand === "init" || subcommand === "nuke") {
     renderInfo(`Run \`hive ${rawSubcommand}\` from your shell. This command is interactive.`);
     return "handled";
   }
@@ -1079,6 +1209,13 @@ async function handleChatSlashCommand(input: {
     });
     input.lastUserPromptRef.value = null;
     input.lastAssistantRef.value = "";
+    return true;
+  }
+
+  if (lower === "/daemon") {
+    const statusLine = await getDaemonStatusLineInline();
+    renderInfo(statusLine);
+    input.lastUserPromptRef.value = null;
     return true;
   }
 
@@ -1252,6 +1389,7 @@ async function handleChatSlashCommand(input: {
     }
 
     try {
+      const { openPage } = await import("../../browser/browser.js");
       const content = await openPage(url);
       await streamEphemeral({
         provider: input.provider,
@@ -1511,19 +1649,12 @@ function buildRecapMessages(input: {
   });
 }
 
-function formatConversationMarkdown(
-  messages: MessageRecord[],
-  conversationId: string,
-): string {
+function formatConversationMarkdown(messages: MessageRecord[], conversationId: string): string {
   const lines = [`# Conversation ${conversationId}`, ""];
 
   for (const message of messages) {
     const speaker =
-      message.role === "user"
-        ? "User"
-        : message.role === "assistant"
-          ? "Hive"
-          : "System";
+      message.role === "user" ? "User" : message.role === "assistant" ? "Hive" : "System";
     lines.push(`**${speaker}:**`, message.content, "");
   }
 
@@ -1721,14 +1852,10 @@ async function readPromptWithSuggestions(): Promise<string> {
 
         if (key.name === "up") {
           selectedSuggestionIndex =
-            selectedSuggestionIndex > 0
-              ? selectedSuggestionIndex - 1
-              : suggestions.length - 1;
+            selectedSuggestionIndex > 0 ? selectedSuggestionIndex - 1 : suggestions.length - 1;
         } else {
           selectedSuggestionIndex =
-            selectedSuggestionIndex < suggestions.length - 1
-              ? selectedSuggestionIndex + 1
-              : 0;
+            selectedSuggestionIndex < suggestions.length - 1 ? selectedSuggestionIndex + 1 : 0;
         }
 
         render();

@@ -1,8 +1,4 @@
-import {
-  normalizeProviderName,
-  type Provider,
-  type ProviderName,
-} from "./base.js";
+import { normalizeProviderName, type Provider, type ProviderName } from "./base.js";
 import { AnthropicProvider, createAnthropicProvider } from "./anthropic.js";
 import { GoogleProvider, createGoogleProvider } from "./google.js";
 import { GroqProvider, createGroqProvider } from "./groq.js";
@@ -38,10 +34,7 @@ export async function createProvider(name?: string): Promise<Provider> {
   }
 }
 
-export async function createProviderWithKey(
-  name: string,
-  apiKey?: string,
-): Promise<Provider> {
+export async function createProviderWithKey(name: string, apiKey?: string): Promise<Provider> {
   const resolvedName = normalizeProviderName(name);
 
   switch (resolvedName) {

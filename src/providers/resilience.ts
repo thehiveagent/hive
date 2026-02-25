@@ -22,10 +22,9 @@ export async function* withFirstTokenTimeout<T>(
   try {
     while (true) {
       const nextPromise = iterator.next();
-      const result =
-        !firstReceived
-          ? await Promise.race([nextPromise, delayWithValue(timeoutMs, timeoutMarker)])
-          : await nextPromise;
+      const result = !firstReceived
+        ? await Promise.race([nextPromise, delayWithValue(timeoutMs, timeoutMarker)])
+        : await nextPromise;
 
       if (result === timeoutMarker) {
         throw new Error("Provider timeout: no response within 30 seconds.");

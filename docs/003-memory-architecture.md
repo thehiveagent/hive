@@ -26,18 +26,21 @@ Human memory doesn't work that way. Some things are permanent (your name, your p
 ## Layer Details
 
 ### Core Persona
+
 - Rebuilt nightly by a compression process
 - Takes all interactions from the day, extracts what matters, rewrites the persona
 - Never grows — stays at a fixed token budget
 - Influences the system prompt on every conversation
 
 ### Episodic Memory
+
 - Recent interactions stored as vector embeddings (sqlite-vec)
 - Semantically searchable — retrieved by relevance, not recency alone
 - Rolling window — old episodes decay and are absorbed into persona
 - Answers "what happened recently that's relevant to this conversation"
 
 ### Knowledge Graph
+
 - Permanent hard facts — name, DOB, profession, relationships, preferences
 - Written explicitly (by user or extracted with high confidence)
 - Never expires, never decays

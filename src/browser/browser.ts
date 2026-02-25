@@ -1,5 +1,5 @@
-import { chromium } from "playwright";
 import fetch from "node-fetch";
+import type { Browser } from "playwright";
 
 const MAX_CONTENT_CHARS = 8000;
 const SEARCH_RESULT_LIMIT = 5;
@@ -11,6 +11,8 @@ const DEFAULT_REQUEST_HEADERS = {
   "user-agent":
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 };
+
+let browserPromise: Promise<Browser> | null = null;
 
 export interface SearchResult {
   title: string;
@@ -38,10 +40,9 @@ export async function search(query: string): Promise<SearchResult[]> {
 
   let browserResults: SearchResult[] = [];
   try {
-    const browser = await launchBrowser();
-
+    const browser = await getBrowser();
+    const page = await browser.newPage();
     try {
-      const page = await browser.newPage();
       const searchUrls = [
         `https://duckduckgo.com/html/?q=${encodeURIComponent(trimmedQuery)}`,
         `https://www.google.com/search?q=${encodeURIComponent(trimmedQuery)}&hl=en&num=10&pws=0`,
@@ -58,10 +59,9 @@ export async function search(query: string): Promise<SearchResult[]> {
         }
 
         const html = await page.content();
-        const results =
-          searchUrl.includes("duckduckgo.com")
-            ? parseDuckDuckGoResults(html)
-            : parseGoogleResults(html);
+        const results = searchUrl.includes("duckduckgo.com")
+          ? parseDuckDuckGoResults(html)
+          : parseGoogleResults(html);
 
         if (results.length > 0) {
           browserResults = results;
@@ -69,7 +69,7 @@ export async function search(query: string): Promise<SearchResult[]> {
         }
       }
     } finally {
-      await browser.close();
+      await page.close().catch(() => {});
     }
   } catch {
     // Continue to HTTP fallback below.
@@ -84,6 +84,8 @@ export async function search(query: string): Promise<SearchResult[]> {
 }
 
 async function launchBrowser() {
+  const { chromium } = await import("playwright");
+
   try {
     return await chromium.launch({ headless: true });
   } catch {
@@ -91,16 +93,32 @@ async function launchBrowser() {
   }
 }
 
-async function openPageWithBrowser(url: string): Promise<string> {
-  const browser = await launchBrowser();
+async function getBrowser(): Promise<Browser> {
+  if (!browserPromise) {
+    browserPromise = launchBrowser();
+  }
+  return browserPromise;
+}
 
+export async function closeBrowser(): Promise<void> {
+  if (!browserPromise) {
+    return;
+  }
+
+  const browser = await browserPromise;
+  browserPromise = null;
+  await browser.close().catch(() => {});
+}
+
+async function openPageWithBrowser(url: string): Promise<string> {
+  const browser = await getBrowser();
+  const page = await browser.newPage();
   try {
-    const page = await browser.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: BROWSER_TIMEOUT_MS });
     const html = await page.content();
     return extractReadableText(html);
   } finally {
-    await browser.close();
+    await page.close().catch(() => {});
   }
 }
 
@@ -127,10 +145,9 @@ async function searchWithHttp(query: string): Promise<SearchResult[]> {
     }
     hadSuccessfulRequest = true;
 
-    const results =
-      searchUrl.includes("duckduckgo.com")
-        ? parseDuckDuckGoResults(html)
-        : parseGoogleResults(html);
+    const results = searchUrl.includes("duckduckgo.com")
+      ? parseDuckDuckGoResults(html)
+      : parseGoogleResults(html);
     if (results.length > 0) {
       return results;
     }
@@ -307,11 +324,7 @@ function normalizeExternalUrl(input: string): string | null {
   }
 }
 
-function extractSnippetForMatch(
-  html: string,
-  startIndex: number,
-  patterns: RegExp[],
-): string {
+function extractSnippetForMatch(html: string, startIndex: number, patterns: RegExp[]): string {
   const window = html.slice(startIndex, startIndex + SEARCH_WINDOW_CHARS);
   let snippetMatch: RegExpMatchArray | null = null;
 
@@ -341,13 +354,7 @@ function extractReadableText(html: string): string {
     firstCapture(withoutNoise, /<main\b[^>]*>([\s\S]*?)<\/main>/i) ??
     firstCapture(withoutNoise, /<article\b[^>]*>([\s\S]*?)<\/article>/i) ??
     withoutNoise;
-  const withoutLayout = stripSections(prioritized, [
-    "nav",
-    "header",
-    "footer",
-    "aside",
-    "form",
-  ]);
+  const withoutLayout = stripSections(prioritized, ["nav", "header", "footer", "aside", "form"]);
   const text = cleanupText(withoutLayout);
 
   if (text.length <= MAX_CONTENT_CHARS) {
@@ -389,7 +396,7 @@ function decodeHtmlEntities(value: string): string {
     amp: "&",
     lt: "<",
     gt: ">",
-    quot: "\"",
+    quot: '"',
     apos: "'",
     nbsp: " ",
   };

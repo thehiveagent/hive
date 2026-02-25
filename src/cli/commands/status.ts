@@ -6,12 +6,7 @@ import { createConnection } from "node:net";
 import chalk from "chalk";
 import { Command } from "commander";
 import keytar from "keytar";
-import {
-  renderHiveHeader,
-  renderInfo,
-  renderSeparator,
-  renderStep,
-} from "../ui.js";
+import { renderHiveHeader, renderInfo, renderSeparator, renderStep } from "../ui.js";
 
 import {
   closeHiveDatabase,
@@ -79,10 +74,7 @@ export async function runStatusCommandWithOptions(
     printStatusLine("Model", agent.model);
     printStatusLine("API Key", keyStatus);
     renderSeparator();
-    printStatusLine(
-      "Database",
-      `${displayPath(dbPath)} (${formatBytes(dbSizeBytes)})`,
-    );
+    printStatusLine("Database", `${displayPath(dbPath)} (${formatBytes(dbSizeBytes)})`);
     printStatusLine(
       "Prompts",
       `${ensureTrailingSlash(displayPath(promptsPath))} (${promptFiles} files)`,
@@ -122,9 +114,7 @@ function getFileSize(path: string): number {
 
 function countFiles(path: string): number {
   try {
-    return fs
-      .readdirSync(path, { withFileTypes: true })
-      .filter((entry) => entry.isFile()).length;
+    return fs.readdirSync(path, { withFileTypes: true }).filter((entry) => entry.isFile()).length;
   } catch {
     return 0;
   }

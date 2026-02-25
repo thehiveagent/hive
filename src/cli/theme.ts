@@ -1,10 +1,6 @@
 import chalk, { type ChalkInstance } from "chalk";
 
-import {
-  closeHiveDatabase,
-  getMetaValue,
-  openHiveDatabase,
-} from "../storage/db.js";
+import { closeHiveDatabase, getMetaValue, openHiveDatabase } from "../storage/db.js";
 
 export const DEFAULT_THEME_NAME = "amber";
 export const DEFAULT_THEME_HEX = "#FFA500";
@@ -28,26 +24,38 @@ export interface HiveTheme {
   accent: ChalkInstance;
 }
 
+let cachedTheme: HiveTheme | null = null;
+
 export function applyTheme(hex: string): ChalkInstance {
   const normalizedHex = normalizeHex(hex);
   return chalk.hex(normalizedHex);
 }
 
 export function getTheme(): HiveTheme {
+  if (cachedTheme) {
+    return cachedTheme;
+  }
+
   let db: ReturnType<typeof openHiveDatabase> | null = null;
 
   try {
     db = openHiveDatabase();
     const storedName = getMetaValue(db, "theme");
     const storedHex = getMetaValue(db, "theme_hex");
-    return resolveTheme(storedName, storedHex);
+    cachedTheme = resolveTheme(storedName, storedHex);
+    return cachedTheme;
   } catch {
-    return makeTheme(DEFAULT_THEME_NAME, DEFAULT_THEME_HEX);
+    cachedTheme = makeTheme(DEFAULT_THEME_NAME, DEFAULT_THEME_HEX);
+    return cachedTheme;
   } finally {
     if (db) {
       closeHiveDatabase(db);
     }
   }
+}
+
+export function invalidateThemeCache(): void {
+  cachedTheme = null;
 }
 
 export function isValidHexColor(value: string): boolean {

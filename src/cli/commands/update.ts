@@ -6,10 +6,7 @@ import chalk from "chalk";
 import { Command } from "commander";
 
 import { maybeAutoUpdatePromptsOnBoot } from "../../agent/prompt-auto-update.js";
-import {
-  initializeHiveCtxSession,
-  type HiveCtxSession,
-} from "../../agent/hive-ctx.js";
+import { initializeHiveCtxSession, type HiveCtxSession } from "../../agent/hive-ctx.js";
 import {
   closeHiveDatabase,
   getHiveHomeDir,
@@ -17,11 +14,7 @@ import {
   openHiveDatabase,
 } from "../../storage/db.js";
 import { renderError, renderHiveHeader, renderInfo, renderSuccess } from "../ui.js";
-import {
-  fetchLatestVersion,
-  getLocalVersion,
-  isVersionNewer,
-} from "../helpers/version.js";
+import { fetchLatestVersion, getLocalVersion, isVersionNewer } from "../helpers/version.js";
 
 export function registerUpdateCommand(program: Command): void {
   program

@@ -3,12 +3,7 @@ import { join } from "node:path";
 
 import fetch from "node-fetch";
 
-import {
-  type HiveDatabase,
-  getHiveHomeDir,
-  getMetaValue,
-  setMetaValue,
-} from "../storage/db.js";
+import { type HiveDatabase, getHiveHomeDir, getMetaValue, setMetaValue } from "../storage/db.js";
 
 const PROMPTS_LAST_CHECKED_KEY = "prompts_last_checked";
 const PROMPTS_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -49,9 +44,7 @@ export async function maybeAutoUpdatePromptsOnBoot(
     const missing = remoteFiles.filter((name) => !localFiles.has(name));
     for (const filename of missing) {
       try {
-        const response = await fetch(
-          `${REMOTE_PROMPTS_BASE_URL}${encodeURIComponent(filename)}`,
-        );
+        const response = await fetch(`${REMOTE_PROMPTS_BASE_URL}${encodeURIComponent(filename)}`);
         if (!response.ok) {
           continue;
         }

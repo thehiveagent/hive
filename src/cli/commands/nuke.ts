@@ -7,7 +7,12 @@ import { exec } from "node:child_process";
 import { Command } from "commander";
 import keytar from "keytar";
 
-import { getHiveHomeDir, getPrimaryAgent, openHiveDatabase, closeHiveDatabase } from "../../storage/db.js";
+import {
+  getHiveHomeDir,
+  getPrimaryAgent,
+  openHiveDatabase,
+  closeHiveDatabase,
+} from "../../storage/db.js";
 import { SUPPORTED_PROVIDER_NAMES } from "../../providers/base.js";
 import { renderError, renderHiveHeader, renderInfo, renderSuccess } from "../ui.js";
 
@@ -195,7 +200,12 @@ async function unregisterServiceBeforeNuke(homeDir: string): Promise<void> {
   try {
     switch (platform) {
       case "darwin": {
-        const serviceFile = path.join(home, "Library", "LaunchAgents", "net.thehiveagent.hive-watcher.plist");
+        const serviceFile = path.join(
+          home,
+          "Library",
+          "LaunchAgents",
+          "net.thehiveagent.hive-watcher.plist",
+        );
         if (fs.existsSync(serviceFile)) {
           try {
             await execAsync(`launchctl unload ${serviceFile}`);
@@ -223,7 +233,7 @@ async function unregisterServiceBeforeNuke(homeDir: string): Promise<void> {
 
       case "win32": {
         try {
-          await execAsync("schtasks /delete /tn \"HiveWatcher\" /f");
+          await execAsync('schtasks /delete /tn "HiveWatcher" /f');
         } catch {
           // Ignore
         }

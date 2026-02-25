@@ -31,8 +31,19 @@ const DAEMON_LOCK_FILE = path.join(HIVE_HOME, "daemon.lock");
 const DAEMON_LOG_FILE = path.join(HIVE_HOME, "daemon.log");
 const DAEMON_WATCHER_PID_FILE = path.join(HIVE_HOME, "daemon.watcher.pid");
 const DAEMON_STOP_SENTINEL = path.join(HIVE_HOME, "daemon.stop");
-const DAEMON_SERVICE_FILE_MAC = path.join(homedir(), "Library", "LaunchAgents", "net.thehiveagent.hive-watcher.plist");
-const DAEMON_SERVICE_FILE_LINUX = path.join(homedir(), ".config", "systemd", "user", "hive-watcher.service");
+const DAEMON_SERVICE_FILE_MAC = path.join(
+  homedir(),
+  "Library",
+  "LaunchAgents",
+  "net.thehiveagent.hive-watcher.plist",
+);
+const DAEMON_SERVICE_FILE_LINUX = path.join(
+  homedir(),
+  ".config",
+  "systemd",
+  "user",
+  "hive-watcher.service",
+);
 
 const DEFAULT_PORT = 2718;
 const TCP_TIMEOUT_MS = 3000;
@@ -41,9 +52,7 @@ const TCP_TIMEOUT_MS = 3000;
 import { installService, uninstallService, getServiceStatus } from "./daemon-service.js";
 
 export function registerDaemonCommand(program: Command): void {
-  const daemonCmd = program
-    .command("daemon")
-    .description("Manage the Hive background daemon");
+  const daemonCmd = program.command("daemon").description("Manage the Hive background daemon");
 
   daemonCmd
     .command("start")
@@ -87,7 +96,10 @@ export function registerDaemonCommand(program: Command): void {
 /**
  * Send a command to the daemon via TCP
  */
-function sendDaemonCommand(command: Record<string, unknown>, port: number): Promise<Record<string, unknown>> {
+function sendDaemonCommand(
+  command: Record<string, unknown>,
+  port: number,
+): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const socket = createConnection({ host: "127.0.0.1", port }, () => {
       socket.write(JSON.stringify(command) + "\n");
@@ -212,7 +224,12 @@ export async function runDaemonStartCommand(options: { force?: boolean } = {}): 
     // Start watcher (which will start daemon)
     spinner.text = "Starting watcher process...";
     const { spawn } = await import("node:child_process");
-    const daemonScript = path.join(path.dirname(import.meta.dirname || import.meta.url), "dist", "daemon", "watcher.js");
+    const daemonScript = path.join(
+      path.dirname(import.meta.dirname || import.meta.url),
+      "dist",
+      "daemon",
+      "watcher.js",
+    );
 
     const watcher = spawn(process.execPath, [daemonScript], {
       detached: true,
@@ -386,8 +403,12 @@ export async function runDaemonStatusCommand(): Promise<void> {
         };
       }
 
-      const episodeCount = db.prepare("SELECT COUNT(*) as count FROM episodes").get() as { count: number };
-      const conversationCount = db.prepare("SELECT COUNT(*) as count FROM conversations").get() as { count: number };
+      const episodeCount = db.prepare("SELECT COUNT(*) as count FROM episodes").get() as {
+        count: number;
+      };
+      const conversationCount = db.prepare("SELECT COUNT(*) as count FROM conversations").get() as {
+        count: number;
+      };
       memoryStats = {
         episodes: episodeCount.count,
         conversations: conversationCount.count,
@@ -467,16 +488,22 @@ export async function runDaemonStatusCommand(): Promise<void> {
   console.log(`  ${chalk.dim("· PID        ")} ${daemonStatus.pid ?? chalk.dim("n/a")}`);
   console.log(`  ${chalk.dim("· Uptime     ")} ${chalk.white(uptime)}`);
   console.log(`  ${chalk.dim("· Agent      ")} ${agentInfo?.name ?? chalk.dim("not set")}`);
-  console.log(`  ${chalk.dim("· Provider   ")} ${agentInfo?.provider ?? chalk.dim("none")} · ${agentInfo?.model ?? chalk.dim("none")}`);
+  console.log(
+    `  ${chalk.dim("· Provider   ")} ${agentInfo?.provider ?? chalk.dim("none")} · ${agentInfo?.model ?? chalk.dim("none")}`,
+  );
   console.log(`  ${chalk.dim("· Heartbeat  ")} ${heartbeatAge ?? chalk.dim("unknown")}`);
   console.log(`  ${chalk.dim("· Watcher    ")} ${watcherColor(watcherText)}`);
-  console.log(`  ${chalk.dim("· Memory     ")} ${memoryStats ? `${memoryStats.episodes} episodes · ${memoryStats.conversations} conversations` : chalk.dim("n/a")}`);
+  console.log(
+    `  ${chalk.dim("· Memory     ")} ${memoryStats ? `${memoryStats.episodes} episodes · ${memoryStats.conversations} conversations` : chalk.dim("n/a")}`,
+  );
   console.log(`  ${chalk.dim("· Port       ")} ${chalk.white(`127.0.0.1:${port}`)}`);
   console.log(`  ${chalk.dim("· Log        ")} ${chalk.dim(`${DAEMON_LOG_FILE} (${logSize})`)}`);
   console.log("");
 }
 
-export async function runDaemonLogsCommand(options: { follow?: boolean; lines?: string } = {}): Promise<void> {
+export async function runDaemonLogsCommand(
+  options: { follow?: boolean; lines?: string } = {},
+): Promise<void> {
   renderHiveHeader("Daemon Logs");
 
   const follow = options.follow ?? false;

@@ -41,9 +41,10 @@ export function buildPromptContext(input: BuildPromptContextInput): PromptContex
     },
     {
       label: "Layer 3 — Pinned knowledge",
-      content: pinned.length > 0
-        ? pinned.map((item) => `- ${item.content}`).join("\n")
-        : "(no pinned knowledge)",
+      content:
+        pinned.length > 0
+          ? pinned.map((item) => `- ${item.content}`).join("\n")
+          : "(no pinned knowledge)",
     },
     {
       label: "Layer 4 — Episodic memories",
@@ -150,9 +151,7 @@ function renderNow(): string {
 }
 
 function assembleLayers(layers: Array<{ label: string; content: string }>): string {
-  return layers
-    .map((layer) => `${layer.label}\n${layer.content}`)
-    .join("\n\n");
+  return layers.map((layer) => `${layer.label}\n${layer.content}`).join("\n\n");
 }
 
 function trimToBudget(input: {

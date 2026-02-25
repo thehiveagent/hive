@@ -18,19 +18,29 @@ import { getHiveHomeDir } from "../storage/db.js";
 
 const HIVE_HOME = getHiveHomeDir();
 const DAEMON_PID_FILE = path.join(HIVE_HOME, "daemon.pid");
-const DAEMON_PORT_FILE = path.join(HIVE_HOME, "daemon.port");
 const DAEMON_LOCK_FILE = path.join(HIVE_HOME, "daemon.lock");
 const DAEMON_LOG_FILE = path.join(HIVE_HOME, "daemon.log");
 const DAEMON_STOP_SENTINEL = path.join(HIVE_HOME, "daemon.stop");
 const DAEMON_WATCHER_PID_FILE = path.join(HIVE_HOME, "daemon.watcher.pid");
 
-const WATCHER_CHECK_INTERVAL_MS = 60000; // 60 seconds
-const STALE_THRESHOLD_MS = 90000; // 90 seconds
+const WATCHER_CHECK_INTERVAL_MS = readEnvNumber("HIVE_WATCHER_CHECK_MS", 60000, 250); // 60s default
+const STALE_THRESHOLD_MS = readEnvNumber("HIVE_WATCHER_STALE_MS", 90000, 500); // 90s default
 
 // Watcher state
 let daemonProcess: any = null;
 let watcherInterval: NodeJS.Timeout | null = null;
-let isShuttingDown = false;
+
+function readEnvNumber(name: string, fallback: number, min: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < min) {
+    return fallback;
+  }
+  return parsed;
+}
 
 /**
  * Log to file
@@ -136,7 +146,12 @@ function spawnDaemon(): Promise<void> {
   return new Promise((resolve, reject) => {
     logToDaemonFile("Spawning new daemon process...");
 
-    const daemonScript = path.join(import.meta.dirname || import.meta.url, "..", "daemon", "index.js");
+    const daemonScript = path.join(
+      import.meta.dirname || import.meta.url,
+      "..",
+      "daemon",
+      "index.js",
+    );
 
     daemonProcess = spawn(process.execPath, [daemonScript], {
       detached: true,
@@ -229,7 +244,6 @@ async function ensureDaemonRunning(): Promise<void> {
  * Cleanup and exit
  */
 async function cleanupAndExit(): Promise<void> {
-  isShuttingDown = true;
   logToDaemonFile("Watcher shutting down...");
 
   if (watcherInterval) {

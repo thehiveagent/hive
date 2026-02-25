@@ -63,9 +63,7 @@ export function registerMemoryCommand(program: Command): void {
     .command("clear")
     .description("clear episodic memory")
     .action(async () => {
-      const confirm = await promptYesNo(
-        "This will delete all episodic memories. Continue? (y/n) ",
-      );
+      const confirm = await promptYesNo("This will delete all episodic memories. Continue? (y/n) ");
       if (!confirm) {
         renderInfo("Cancelled.");
         return;

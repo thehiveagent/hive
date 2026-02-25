@@ -28,6 +28,7 @@ import { renderError, renderHiveHeader, renderInfo, renderSuccess } from "../ui.
 
 const KEYCHAIN_SERVICE = "hive";
 const PROMPTS_DIRECTORY = "prompts";
+const CTX_DIRECTORY = "ctx";
 const PROVIDER_PING_TIMEOUT_MS = 5_000;
 const OLLAMA_PING_TIMEOUT_MS = 5_000;
 const DB_SIZE_WARNING_BYTES = 100 * 1024 * 1024;
@@ -70,6 +71,7 @@ export async function runDoctorCommand(options: DoctorOptions = {}): Promise<voi
   const counters: CheckCounter = { warnings: 0, errors: 0 };
   const dbPath = getHiveDatabasePath();
   const promptsPath = join(getHiveHomeDir(), PROMPTS_DIRECTORY);
+  const ctxPath = join(getHiveHomeDir(), CTX_DIRECTORY);
 
   let dbSizeBytes = 0;
   let db: HiveDatabase | null = null;
@@ -102,7 +104,9 @@ export async function runDoctorCommand(options: DoctorOptions = {}): Promise<voi
   }
 
   if (databaseCheck.ok) {
-    renderSuccess(formatCheckLine("Database", `${displayPath(dbPath)} (${formatBytes(dbSizeBytes)})`));
+    renderSuccess(
+      formatCheckLine("Database", `${displayPath(dbPath)} (${formatBytes(dbSizeBytes)})`),
+    );
   } else {
     renderFailure("Database", databaseCheck.message, counters);
   }
@@ -135,15 +139,9 @@ export async function runDoctorCommand(options: DoctorOptions = {}): Promise<voi
   if (providerName) {
     const providerReachable = await checkProviderReachable(providerName, keychainApiKey);
     if (providerReachable.ok) {
-      renderSuccess(
-        formatCheckLine("Provider", `${providerName} — reachable`),
-      );
+      renderSuccess(formatCheckLine("Provider", `${providerName} — reachable`));
     } else if (providerReachable.warning) {
-      renderWarning(
-        "Provider",
-        `${providerName} — ${providerReachable.message}`,
-        counters,
-      );
+      renderWarning("Provider", `${providerName} — ${providerReachable.message}`, counters);
     } else {
       renderFailure("Provider", `${providerName} — ${providerReachable.message}`, counters);
     }
@@ -155,11 +153,18 @@ export async function runDoctorCommand(options: DoctorOptions = {}): Promise<voi
 
   const promptsCheck = checkPromptsDirectory(promptsPath);
   if (promptsCheck.ok) {
-    renderSuccess(
-      formatCheckLine("Prompts", `${promptsCheck.fileCount} files loaded`),
-    );
+    renderSuccess(formatCheckLine("Prompts", `${promptsCheck.fileCount} files loaded`));
   } else {
     renderFailure("Prompts", promptsCheck.message, counters);
+  }
+
+  const hiveCtxCheck = await checkHiveCtxStorage(ctxPath);
+  if (hiveCtxCheck.ok) {
+    renderSuccess(formatCheckLine("hive-ctx", hiveCtxCheck.message));
+  } else if (hiveCtxCheck.warning) {
+    renderWarning("hive-ctx", hiveCtxCheck.message, counters);
+  } else {
+    renderFailure("hive-ctx", hiveCtxCheck.message, counters);
   }
 
   if (db) {
@@ -229,7 +234,9 @@ export async function runDoctorCommand(options: DoctorOptions = {}): Promise<voi
 
 function checkDatabase(
   databasePath: string,
-): { ok: true; db: HiveDatabase; sizeBytes: number } | { ok: false; message: string; sizeBytes: number } {
+):
+  | { ok: true; db: HiveDatabase; sizeBytes: number }
+  | { ok: false; message: string; sizeBytes: number } {
   if (!fs.existsSync(databasePath)) {
     return {
       ok: false,
@@ -294,10 +301,14 @@ async function checkProviderReachable(
   }
 
   try {
-    const response = await fetchWithTimeout(target.url, {
-      method: "GET",
-      headers: target.headers,
-    }, PROVIDER_PING_TIMEOUT_MS);
+    const response = await fetchWithTimeout(
+      target.url,
+      {
+        method: "GET",
+        headers: target.headers,
+      },
+      PROVIDER_PING_TIMEOUT_MS,
+    );
 
     if (response.ok) {
       return { ok: true };
@@ -425,6 +436,40 @@ function checkPromptsDirectory(
   };
 }
 
+async function checkHiveCtxStorage(ctxPath: string): Promise<{
+  ok: boolean;
+  warning?: boolean;
+  message: string;
+}> {
+  let hiveCtxInstalled = false;
+  try {
+    await import("@imisbahk/hive-ctx");
+    hiveCtxInstalled = true;
+  } catch {
+    hiveCtxInstalled = false;
+  }
+
+  if (!hiveCtxInstalled) {
+    return { ok: false, warning: true, message: "not installed (legacy context pipeline active)" };
+  }
+
+  if (!fs.existsSync(ctxPath)) {
+    return { ok: false, message: `${ensureTrailingSlash(displayPath(ctxPath))} missing` };
+  }
+
+  const graphDb = join(ctxPath, "hive_graph.sqlite");
+  const memoryDb = join(ctxPath, "hive_memory.sqlite");
+
+  if (!fs.existsSync(graphDb) || !fs.existsSync(memoryDb)) {
+    return {
+      ok: false,
+      message: "storage missing (expected hive_graph.sqlite + hive_memory.sqlite)",
+    };
+  }
+
+  return { ok: true, message: "storage ready" };
+}
+
 function checkNodeVersion(version: string): { ok: boolean; message: string } {
   const major = parseNodeMajorVersion(version);
   if (major !== null && major >= NODE_MAJOR_WARNING_VERSION) {
@@ -509,18 +554,14 @@ function countRowsIfTableExists(db: HiveDatabase, tableName: string): number | n
     return null;
   }
 
-  const row = db
-    .prepare(`SELECT COUNT(1) AS count FROM ${tableName}`)
-    .get() as { count: number };
+  const row = db.prepare(`SELECT COUNT(1) AS count FROM ${tableName}`).get() as { count: number };
 
   return row.count;
 }
 
 function tableExists(db: HiveDatabase, tableName: string): boolean {
   const row = db
-    .prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
-    )
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
     .get(tableName) as { name: string } | undefined;
 
   return Boolean(row);

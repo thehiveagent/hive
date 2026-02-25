@@ -9,18 +9,13 @@ import ora from "ora";
 import { resolveProviderApiKey } from "../../providers/api-key.js";
 import { normalizeProviderName, type ProviderName } from "../../providers/base.js";
 import { promptForModel, promptForProvider } from "../helpers/providerPrompts.js";
-import {
-  renderError,
-  renderHiveHeader,
-  renderInfo,
-  renderStep,
-  renderSuccess,
-} from "../ui.js";
+import { renderError, renderHiveHeader, renderInfo, renderStep, renderSuccess } from "../ui.js";
 import {
   BUILT_IN_THEMES,
   DEFAULT_THEME_HEX,
   applyTheme,
   getTheme,
+  invalidateThemeCache,
   isValidHexColor,
   type ThemeName,
 } from "../theme.js";
@@ -372,6 +367,7 @@ export async function runConfigThemeCommandWithOptions(
     spinner.start("Saving theme...");
     setMetaValue(db, "theme", theme);
     setMetaValue(db, "theme_hex", themeHex);
+    invalidateThemeCache();
     spinner.succeed("Theme saved.");
 
     console.log(applyTheme(themeHex)("✓ Theme set. The Hive is now yours."));
@@ -489,15 +485,13 @@ async function selectThemeOption(
       }
 
       if (key.name === "up") {
-        selectedIndex =
-          selectedIndex > 0 ? selectedIndex - 1 : themeOptions.length - 1;
+        selectedIndex = selectedIndex > 0 ? selectedIndex - 1 : themeOptions.length - 1;
         render();
         return;
       }
 
       if (key.name === "down") {
-        selectedIndex =
-          selectedIndex < themeOptions.length - 1 ? selectedIndex + 1 : 0;
+        selectedIndex = selectedIndex < themeOptions.length - 1 ? selectedIndex + 1 : 0;
         render();
         return;
       }

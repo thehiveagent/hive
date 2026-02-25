@@ -9,6 +9,7 @@ This document describes the CLI commands and in-chat slash commands implemented 
 Starts the interactive chat UI (same as `hive chat`, but `hive` is preferred). If you pass no arguments, Hive drops you into chat.
 
 Examples:
+
 ```bash
 hive
 ```
@@ -18,9 +19,11 @@ hive
 Interactive first-run setup. Creates/updates your local Hive profile and copies `prompts/` into `~/.hive/prompts/`.
 
 Options:
+
 - `--force`: overwrite `~/.hive/prompts/` when loading prompts
 
 Examples:
+
 ```bash
 hive init
 hive init --force
@@ -31,6 +34,7 @@ hive init --force
 Interactive chat UI. Use `hive` instead.
 
 Options:
+
 - `-m, --message <text>`: send a single message and exit
 - `-c, --conversation <id>`: continue an existing conversation
 - `--model <model>`: override model for this session
@@ -39,6 +43,7 @@ Options:
 - `--preview`: run the chat UI preview without Hive initialization
 
 Examples:
+
 ```bash
 hive chat
 hive chat --message "Summarize my last conversation"
@@ -52,6 +57,7 @@ hive chat --preview
 Manage the background agent process. The daemon automatically restarts, communicates over TCP IPC on port `2718`, and uses a sentinel stop protocol so it only stops when explicitly told.
 
 Subcommands:
+
 - `hive daemon start`: start the daemon in the background
 - `hive daemon stop`: cleanly stop the daemon using the sentinel stop protocol
 - `hive daemon restart`: gracefully restart the daemon
@@ -59,6 +65,7 @@ Subcommands:
 - `hive daemon logs`: tail the daemon logs
 
 Examples:
+
 ```bash
 hive daemon start
 hive daemon status
@@ -70,6 +77,7 @@ hive daemon stop
 Update provider/model/API keys/theme without re-running init.
 
 Subcommands:
+
 - `hive config provider`: interactive provider + model + key setup
 - `hive config model`: interactive model selection for the current provider
 - `hive config key`: interactive API key update for the current provider
@@ -77,6 +85,7 @@ Subcommands:
 - `hive config theme`: interactive accent theme picker (amber/cyan/rose/slate/green/custom hex)
 
 Examples:
+
 ```bash
 hive config
 hive config show
@@ -91,6 +100,7 @@ hive config theme
 Shows your local Hive status: owner, agent name, provider/model, API key set/not set, database path + size, prompts file count, and initialization date.
 
 Example:
+
 ```bash
 hive status
 ```
@@ -100,6 +110,7 @@ hive status
 Runs a diagnostic pass over your local Hive setup (database, prompts, theme config, provider reachability, Playwright install, Node version, and basic DB counts).
 
 Example:
+
 ```bash
 hive doctor
 ```
@@ -109,12 +120,14 @@ hive doctor
 Manage stored knowledge and episodic memory without leaving the CLI.
 
 Subcommands:
+
 - `hive memory list`: show all knowledge graph entries (pinned marked)
 - `hive memory auto`: show automatically extracted facts (source `auto`) with timestamps
 - `hive memory clear`: delete all episodic memories (prompts for confirmation)
 - `hive memory show`: print the current persona
 
 Examples:
+
 ```bash
 hive memory list
 hive memory auto
@@ -127,6 +140,7 @@ hive memory show
 Updates the globally installed Hive CLI to the latest published version (npm), then syncs missing prompts and warms the context cache when possible.
 
 Example:
+
 ```bash
 hive update
 ```
@@ -136,6 +150,7 @@ hive update
 Irreversibly deletes your local Hive data (`~/.hive/`) and attempts to delete API keys stored in your OS keychain under the `hive` service.
 
 Example:
+
 ```bash
 hive nuke
 ```
@@ -154,6 +169,7 @@ These commands are available inside the interactive chat UI (`hive`).
 - `/daemon`: print current daemon status in chat
 
 Examples:
+
 ```text
 /help
 /new
@@ -167,13 +183,14 @@ Examples:
 
 Hive supports web browsing and search via Playwright-backed helpers.
 
-- `/browse <url>`: fetch a page and inject it into the prompt as *untrusted context*
+- `/browse <url>`: fetch a page and inject it into the prompt as _untrusted context_
 - `browse <url>`: same as `/browse`
-- `/search <query>`: search the web and inject results into the prompt as *untrusted context*
+- `/search <query>`: search the web and inject results into the prompt as _untrusted context_
 - `search <query>`: same as `/search`
 - `/summarize <url>`: open a page and stream a concise summary back
 
 Examples:
+
 ```text
 /browse https://example.com
 /browse example.com What are the key claims on this page?
@@ -188,6 +205,7 @@ search postgres jsonb indexing tips
 Shortcuts let you run a subset of CLI commands without leaving chat.
 
 Supported shortcuts:
+
 - `/hive help`: list shortcuts
 - `/hive status`: run `hive status`
 - `/hive config show`: run `hive config show`
@@ -202,6 +220,7 @@ Supported shortcuts:
 - `/hive nuke`: prints instructions to run `hive nuke` from your shell (interactive)
 
 Examples:
+
 ```text
 /hive status
 /hive config show
@@ -225,6 +244,7 @@ Examples:
 - `/think <question>`: request chain-of-thought reasoning inline
 
 Example:
+
 ```text
 /remember Loves Ethiopian pour-over
 /pin Lives in Seattle
@@ -239,6 +259,7 @@ Example:
 The Hive includes a comprehensive test suite located in the `scripts/` directory to validate functionality.
 
 To run all tests sequentially:
+
 ```bash
 npm run test
 # OR
@@ -246,6 +267,7 @@ npx ts-node scripts/test-all.ts
 ```
 
 Individual component tests can also be run separately:
+
 - `npx ts-node scripts/test-db.ts` — Tests SQLite storage and memory logic
 - `npx ts-node scripts/test-providers.ts` — Tests LLM provider reachability
 - `npx ts-node scripts/test-hive-ctx.ts` — Tests context engine integration

@@ -10,20 +10,17 @@ import ora from "ora";
 
 import { buildDefaultPersona } from "../../agent/agent.js";
 import { promptForModel, promptForProvider } from "../helpers/providerPrompts.js";
-import {
-  renderHiveHeader,
-  renderInfo,
-  renderStep,
-  renderSuccess,
-} from "../ui.js";
+import { renderHiveHeader, renderInfo, renderStep, renderSuccess } from "../ui.js";
 import {
   closeHiveDatabase,
   getHiveHomeDir,
   getPrimaryAgent,
   openHiveDatabase,
   setMetaValue,
+  type AgentRecord,
   upsertPrimaryAgent,
 } from "../../storage/db.js";
+import { initializeHiveCtxSession } from "../../agent/hive-ctx.js";
 import type { ProviderName } from "../../providers/base.js";
 import { createProviderWithKey, pingProvider } from "../../providers/index.js";
 import { delay } from "../../providers/resilience.js";
@@ -117,6 +114,7 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
       setMetaValue(db, "provider", agent.provider);
       setMetaValue(db, "model", agent.model);
       copyPromptsDirectory(options.force ?? false);
+      await warmupHiveCtx(agent);
 
       spinner.stop();
       await animateHiveId(agent.id);
@@ -157,6 +155,27 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
     throw error;
   } finally {
     closeHiveDatabase(db);
+  }
+}
+
+async function warmupHiveCtx(agent: AgentRecord): Promise<void> {
+  const ctxStoragePath = join(getHiveHomeDir(), "ctx");
+  fs.mkdirSync(ctxStoragePath, { recursive: true });
+
+  const hiveCtx = await initializeHiveCtxSession({
+    storagePath: ctxStoragePath,
+    profile: agent,
+    model: agent.model,
+  });
+
+  if (!hiveCtx.session) {
+    return;
+  }
+
+  try {
+    await hiveCtx.session.build("warmup");
+  } catch {
+    // ignore
   }
 }
 
@@ -304,8 +323,7 @@ async function verifyApiKeyLoop(
       await pingProvider(probeProvider, model);
       return currentKey;
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to verify API key.";
+      const message = error instanceof Error ? error.message : "Unable to verify API key.";
       renderInfo(`API key check failed: ${message}`);
       const answer = (await inquirer.prompt([
         {
@@ -368,11 +386,7 @@ function syncPromptFiles(
 
     if (entry.isDirectory()) {
       fs.mkdirSync(destinationEntryPath, { recursive: true });
-      copiedCount += syncPromptFiles(
-        sourceEntryPath,
-        destinationEntryPath,
-        overwriteExisting,
-      );
+      copiedCount += syncPromptFiles(sourceEntryPath, destinationEntryPath, overwriteExisting);
       continue;
     }
 

@@ -231,7 +231,7 @@ export async function uninstallService(): Promise<void> {
     case "win32": {
       // Windows
       try {
-        await execAsync("schtasks /delete /tn \"HiveWatcher\" /f");
+        await execAsync('schtasks /delete /tn "HiveWatcher" /f');
         renderInfo("Windows Task Scheduler task deleted");
       } catch {
         // Not found
@@ -247,7 +247,11 @@ export async function uninstallService(): Promise<void> {
 /**
  * Get service status for current platform
  */
-export async function getServiceStatus(): Promise<{ installed: boolean; running: boolean; platform: string }> {
+export async function getServiceStatus(): Promise<{
+  installed: boolean;
+  running: boolean;
+  platform: string;
+}> {
   const platform = process.platform;
   let installed = false;
   let running = false;
