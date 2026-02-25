@@ -549,6 +549,16 @@ export async function runDaemonStatusCommand(): Promise<void> {
     uptime = daemonStatusFromDaemon.uptime || "n/a";
   }
 
+  // Integrations
+  const integrations = (daemonStatusFromDaemon?.integrations ?? null) as
+    | Record<string, string>
+    | null;
+  const integrationsText = integrations
+    ? Object.entries(integrations)
+        .map(([k, v]) => `${k} ${v === "running" ? chalk.green("✓") : v === "disabled" ? chalk.gray("—") : chalk.red("✗")}`)
+        .join("  ")
+    : chalk.dim("n/a");
+
   console.log("");
   console.log(chalk.gray("  ◆ Daemon Status"));
   console.log(chalk.gray("  " + "─".repeat(28)));
@@ -561,6 +571,7 @@ export async function runDaemonStatusCommand(): Promise<void> {
   );
   console.log(`  ${chalk.dim("· Heartbeat  ")} ${heartbeatAge ?? chalk.dim("unknown")}`);
   console.log(`  ${chalk.dim("· Watcher    ")} ${watcherColor(watcherText)}`);
+  console.log(`  ${chalk.dim("· Integrations")} ${integrationsText}`);
   console.log(
     `  ${chalk.dim("· Memory     ")} ${memoryStats ? `${memoryStats.episodes} episodes · ${memoryStats.conversations} conversations` : chalk.dim("n/a")}`,
   );

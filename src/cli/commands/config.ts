@@ -99,10 +99,43 @@ export function registerConfigCommand(program: Command): void {
       await runConfigThemeCommand();
     });
 
+  configCommand
+    .command("telegram")
+    .description("Store Telegram bot token in keychain")
+    .action(async () => {
+      await runConfigTelegramCommand();
+    });
+
   configCommand.action(() => {
     renderHiveHeader("Config");
     configCommand.outputHelp();
   });
+}
+
+async function runConfigTelegramCommand(): Promise<void> {
+  renderHiveHeader("Config · Telegram");
+  ensureInteractiveTerminal("`hive config telegram` requires an interactive terminal.");
+
+  const answer = (await inquirer.prompt([
+    {
+      type: "password",
+      name: "token",
+      message: "Telegram bot token:",
+      mask: "*",
+      validate: requiredField("Token is required."),
+    },
+  ])) as { token: string };
+
+  const token = answer.token.trim();
+  const spinner = ora("Saving Telegram token...").start();
+  try {
+    await keytar.setPassword(KEYCHAIN_SERVICE, "telegram", token);
+    spinner.succeed("Telegram token saved.");
+    renderStep("Next: run `hive integrations telegram setup` to authorize your user ID.");
+  } catch (error) {
+    spinner.fail("Failed to save Telegram token.");
+    throw error;
+  }
 }
 
 export async function runConfigProviderCommand(): Promise<void> {

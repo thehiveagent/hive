@@ -8,7 +8,7 @@ export interface SchemaMigration {
   sql: string;
 }
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 const initialSchemaSql = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -132,6 +132,23 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at ON tasks(status, created_
 CREATE INDEX IF NOT EXISTS idx_tasks_completed_at ON tasks(completed_at);
 `,
   },
+  {
+    version: 7,
+    name: "v7_platform_conversations",
+    sql: `
+CREATE TABLE IF NOT EXISTS platform_conversations (
+  id TEXT PRIMARY KEY,
+  platform TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  messages TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_conversations_platform_external_id
+  ON platform_conversations(platform, external_id);
+`,
+  },
 ];
 
 export interface MetaRecord {
@@ -197,4 +214,13 @@ export interface TaskRecord {
   completed_at: string | null;
   agent_id: string | null;
   error: string | null;
+}
+
+export interface PlatformConversationRecord {
+  id: string;
+  platform: string;
+  external_id: string;
+  messages: string | null;
+  created_at: string;
+  updated_at: string;
 }

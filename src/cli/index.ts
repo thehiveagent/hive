@@ -14,6 +14,7 @@ import { registerNukeCommand } from "./commands/nuke.js";
 import { registerStatusCommand } from "./commands/status.js";
 import { registerUpdateCommand } from "./commands/update.js";
 import { registerTaskCommand } from "./commands/task.js";
+import { registerIntegrationsCommand } from "./commands/integrations.js";
 import { getLocalVersion } from "./helpers/version.js";
 import { renderError, renderHiveHeader } from "./ui.js";
 
@@ -34,6 +35,7 @@ registerNukeCommand(program);
 registerMemoryCommand(program);
 registerUpdateCommand(program);
 registerTaskCommand(program);
+registerIntegrationsCommand(program);
 
 const argv = process.argv.slice(2);
 

@@ -56,6 +56,7 @@ import {
   isVersionNewer,
 } from "../helpers/version.js";
 import { formatRelativeTime, groupTasks } from "../helpers/tasks.js";
+import { listPendingAuth } from "../../integrations/auth.js";
 import {
   runConfigKeyCommandWithOptions,
   runConfigModelCommandWithOptions,
@@ -104,8 +105,10 @@ const COMMAND_HELP_TEXT = [
   "  /help           show commands",
   "  /new            start a new conversation",
   "  /daemon         show daemon status",
+  "  /integrations   show integrations status",
   "  /tasks          list background tasks",
   "  /task <desc>    queue a background task",
+  "  /permissions    review pending auth",
   "  /remember <fact> save a fact",
   "  /forget <thing>  delete closest fact",
   "  /pin <fact>      pin fact into context",
@@ -189,6 +192,16 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
     label: "/daemon",
     insertText: "/daemon",
     description: "show daemon status",
+  },
+  {
+    label: "/integrations",
+    insertText: "/integrations",
+    description: "show integrations status",
+  },
+  {
+    label: "/permissions",
+    insertText: "/permissions",
+    description: "review pending auth",
   },
   {
     label: "/tasks",
@@ -445,6 +458,22 @@ export async function runChatCommand(
       provider: profile.provider,
       model,
     });
+
+    const pending = listPendingAuth();
+    if (pending.length > 0) {
+      const countLine =
+        pending.length === 1
+          ? "  ✦ 1 authorization request pending"
+          : `  ✦ ${pending.length} authorization requests pending`;
+      console.log("");
+      console.log(chalk.dim(countLine));
+      const first = pending[0];
+      console.log(
+        chalk.dim(`  · ${first.from} on ${capitalizePlatform(first.platform)} wants to talk to ${agentName}`),
+      );
+      console.log(chalk.dim("  · run /permissions to allow or block"));
+      console.log("");
+    }
 
     if (options.message) {
       const augmentedMessage = await buildBrowserAugmentedPrompt(options.message, {
@@ -914,6 +943,11 @@ function combineSystemAdditions(parts: Array<string | undefined | null>): string
   return merged.length > 0 ? merged : undefined;
 }
 
+function capitalizePlatform(platform: string): string {
+  if (!platform) return platform;
+  return platform.slice(0, 1).toUpperCase() + platform.slice(1).toLowerCase();
+}
+
 function isUnknownSlashCommand(prompt: string): boolean {
   const normalized = prompt.trim().toLowerCase();
   if (!normalized.startsWith("/")) {
@@ -924,6 +958,9 @@ function isUnknownSlashCommand(prompt: string): boolean {
     normalized === "/help" ||
     normalized === "/new" ||
     normalized === "/daemon" ||
+    normalized === "/integrations" ||
+    normalized === "/integrations auth" ||
+    normalized === "/permissions" ||
     normalized === "/tasks" ||
     normalized === "/task" ||
     normalized.startsWith("/task ") ||
@@ -1276,6 +1313,50 @@ async function handleChatSlashCommand(input: {
   if (lower === "/daemon") {
     const statusLine = await getDaemonStatusLineInline();
     renderInfo(statusLine);
+    input.lastUserPromptRef.value = null;
+    return true;
+  }
+
+  if (lower === "/integrations") {
+    const home = getHiveHomeDir();
+    const portFile = join(home, "daemon.port");
+    const port = readNumberFromFile(portFile) ?? 2718;
+    const live = await getDaemonStatusViaTcp(port);
+    const integrations = (live?.integrations ?? null) as Record<string, string> | null;
+    if (!integrations) {
+      renderInfo("Integrations: n/a (daemon not reachable)");
+      input.lastUserPromptRef.value = null;
+      return true;
+    }
+
+    const platforms = ["telegram", "whatsapp", "discord", "slack"];
+    const line = platforms
+      .map((p) => {
+        const v = integrations[p];
+        if (v === "running") return `${p} ✓`;
+        if (v === "disabled") return `${p} —`;
+        return `${p} ✗`;
+      })
+      .join("  ");
+    renderInfo(`Integrations: ${line}`);
+    input.lastUserPromptRef.value = null;
+    return true;
+  }
+
+  if (lower === "/integrations auth" || lower === "/permissions") {
+    const pending = listPendingAuth();
+    if (pending.length === 0) {
+      renderInfo("No pending authorization requests.");
+      input.lastUserPromptRef.value = null;
+      return true;
+    }
+
+    renderInfo(`✦ ${pending.length} authorization request(s) pending`);
+    pending.forEach((req) => {
+      renderInfo(`· ${req.from} on ${capitalizePlatform(req.platform)}`);
+    });
+    renderInfo("Run: hive integrations auth add <platform> <id>");
+    renderInfo("Or:  hive integrations auth remove <platform> <id>");
     input.lastUserPromptRef.value = null;
     return true;
   }

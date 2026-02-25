@@ -1,6 +1,6 @@
 {
     "name": "@imisbahk/hive",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "Your agent. Always running. Always learning. Always working.",
     "type": "module",
     "bin": {
@@ -41,8 +41,13 @@
         "openai": "^4.28.0",
         "ora": "^8.0.1",
         "playwright": "^1.58.2",
+        "@slack/bolt": "^4.4.0",
+        "discord.js": "^14.19.3",
+        "node-telegram-bot-api": "^0.66.0",
+        "qrcode-terminal": "^0.12.0",
         "typecheck": "^0.1.2",
-        "uuid": "^9.0.1"
+        "uuid": "^9.0.1",
+        "whatsapp-web.js": "^1.26.0"
     },
     "files": [
         "dist/",
@@ -56,6 +61,8 @@
         "@types/better-sqlite3": "^7.6.8",
         "@types/inquirer": "^9.0.7",
         "@types/node": "^20.11.20",
+        "@types/node-telegram-bot-api": "^0.64.10",
+        "@types/qrcode-terminal": "^0.12.2",
         "@types/uuid": "^9.0.8",
         "eslint": "^10.0.1",
         "prettier": "^3.8.1",

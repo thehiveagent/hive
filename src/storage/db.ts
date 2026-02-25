@@ -15,6 +15,7 @@ import {
   type MessageRecord,
   type MessageRole,
   type MetaRecord,
+  type PlatformConversationRecord,
   type TaskRecord,
   type TaskStatus,
 } from "./schema.js";
@@ -28,6 +29,7 @@ export type {
   MessageRecord,
   MessageRole,
   MetaRecord,
+  PlatformConversationRecord,
   TaskRecord,
   TaskStatus,
 } from "./schema.js";
@@ -89,6 +91,13 @@ export interface InsertTaskInput {
   agentId?: string | null;
 }
 
+export interface PlatformConversationMessage {
+  role: "user" | "assistant";
+  text: string;
+  messageId?: string;
+  timestamp: number;
+}
+
 export const HIVE_DIRECTORY_NAME = ".hive";
 export const HIVE_DB_FILENAME = "hive.db";
 
@@ -125,6 +134,65 @@ export function closeHiveDatabase(db: HiveDatabase): void {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+export function upsertPlatformConversation(
+  db: HiveDatabase,
+  input: {
+    platform: string;
+    externalId: string;
+    messages: PlatformConversationMessage[];
+  },
+): PlatformConversationRecord {
+  const timestamp = nowIso();
+  const id = `${input.platform}:${input.externalId}`;
+  const messages = JSON.stringify(input.messages);
+
+  db.prepare(
+    `
+    INSERT INTO platform_conversations (id, platform, external_id, messages, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(platform, external_id) DO UPDATE SET
+      messages = excluded.messages,
+      updated_at = excluded.updated_at
+  `,
+  ).run(id, input.platform, input.externalId, messages, timestamp, timestamp);
+
+  const row = db
+    .prepare(
+      `
+      SELECT id, platform, external_id, messages, created_at, updated_at
+      FROM platform_conversations
+      WHERE platform = ? AND external_id = ?
+      LIMIT 1
+    `,
+    )
+    .get(input.platform, input.externalId) as PlatformConversationRecord | undefined;
+
+  if (!row) {
+    throw new Error("Failed to upsert platform_conversation");
+  }
+
+  return row;
+}
+
+export function getPlatformConversation(
+  db: HiveDatabase,
+  platform: string,
+  externalId: string,
+): PlatformConversationRecord | null {
+  const row = db
+    .prepare(
+      `
+      SELECT id, platform, external_id, messages, created_at, updated_at
+      FROM platform_conversations
+      WHERE platform = ? AND external_id = ?
+      LIMIT 1
+    `,
+    )
+    .get(platform, externalId) as PlatformConversationRecord | undefined;
+
+  return row ?? null;
 }
 
 function configureDatabase(db: HiveDatabase): void {

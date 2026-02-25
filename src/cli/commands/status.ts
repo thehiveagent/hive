@@ -88,6 +88,7 @@ export async function runStatusCommandWithOptions(
       `${taskCounts.queued} queued · ${taskCounts.running} running · ${taskCounts.done} done`,
     );
     printStatusLine("Daemon", await getDaemonStatusLine());
+    printStatusLine("Integrations", await getIntegrationsStatusLine());
   } finally {
     closeHiveDatabase(db);
   }
@@ -242,6 +243,34 @@ async function getDaemonStatusLine(): Promise<string> {
   }
 
   return `${daemonStatus} | ${watcherStatus} | heartbeat: ${heartbeat}`;
+}
+
+async function getIntegrationsStatusLine(): Promise<string> {
+  const daemonPortFile = join(getHiveHomeDir(), "daemon.port");
+  let daemonPort = DEFAULT_PORT;
+
+  try {
+    const content = fs.readFileSync(daemonPortFile, "utf8").trim();
+    daemonPort = parseInt(content, 10) || DEFAULT_PORT;
+  } catch {
+    // Use default
+  }
+
+  const status = await Promise.resolve(getDaemonStatus(daemonPort));
+  const integrations = status?.integrations as Record<string, string> | undefined;
+  if (!integrations) {
+    return "n/a";
+  }
+
+  const platforms = ["telegram", "whatsapp", "discord", "slack"];
+  return platforms
+    .map((p) => {
+      const v = integrations[p];
+      if (v === "running") return `${p} ✓`;
+      if (v === "disabled") return `${p} —`;
+      return `${p} ✗`;
+    })
+    .join("  ");
 }
 
 /**

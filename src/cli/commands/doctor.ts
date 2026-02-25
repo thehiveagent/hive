@@ -10,6 +10,7 @@ import fetch from "node-fetch";
 import keytar from "keytar";
 
 import { normalizeProviderName, type ProviderName } from "../../providers/base.js";
+import { readAuthorizedConfig, readDisabledConfig } from "../../integrations/auth.js";
 import {
   closeHiveDatabase,
   countTasksByStatus,
@@ -181,6 +182,14 @@ export async function runDoctorCommand(options: DoctorOptions = {}): Promise<voi
     } else {
       renderSuccess(formatCheckLine("Task worker", `${summary} · idle`));
     }
+
+    const integrations = await diagnoseIntegrations(daemonStatus);
+    if (integrations.warning) {
+      renderWarning("Integrations", integrations.summary, counters);
+    } else {
+      renderSuccess(formatCheckLine("Integrations", integrations.summary));
+    }
+    renderInfo(formatInfoLine("Auth", integrations.authSummary));
   } else {
     renderFailure("Task worker", "not checked (database unavailable)", counters);
   }
@@ -248,6 +257,56 @@ export async function runDoctorCommand(options: DoctorOptions = {}): Promise<voi
   if (db) {
     closeHiveDatabase(db);
   }
+}
+
+async function diagnoseIntegrations(
+  daemonStatus: Record<string, unknown> | null,
+): Promise<{ summary: string; authSummary: string; warning: boolean }> {
+  const platforms = ["telegram", "whatsapp", "discord", "slack"] as const;
+
+  const safeKeychainHas = async (account: string): Promise<boolean> => {
+    try {
+      const value = await keytar.getPassword(KEYCHAIN_SERVICE, account);
+      return Boolean(value && value.trim().length > 0);
+    } catch {
+      return false;
+    }
+  };
+
+  const configured: Record<(typeof platforms)[number], boolean> = {
+    telegram: await safeKeychainHas("telegram"),
+    discord: await safeKeychainHas("discord"),
+    slack: await safeKeychainHas("slack"),
+    whatsapp: fs.existsSync(join(getHiveHomeDir(), "integrations", "whatsapp", "session")),
+  };
+
+  const disabled = readDisabledConfig();
+  const auth = readAuthorizedConfig();
+
+  const running = (daemonStatus?.integrations ?? null) as Record<string, string> | null;
+  const daemonReachable = Boolean(daemonStatus);
+
+  const parts = platforms.map((p) => {
+    if (disabled[p]) return `${p} disabled`;
+    if (!configured[p]) return `${p} not configured`;
+    const r = running?.[p];
+    if (r === "running") return `${p} running`;
+    if (daemonReachable) return `${p} ${r ?? "configured"}`;
+    return `${p} configured`;
+  });
+
+  const authSummary = platforms
+    .map((p) => `${p} ${(auth as any)[p]?.length ?? 0}`)
+    .join("  ");
+
+  const anyConfigured = Object.values(configured).some(Boolean);
+  const warning = anyConfigured && !daemonReachable;
+
+  return {
+    summary: parts.join(" · "),
+    authSummary,
+    warning,
+  };
 }
 
 function checkDatabase(

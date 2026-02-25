@@ -7,7 +7,7 @@
 - **npm package**: `@imisbahk/hive`
 - **Organization**: `thehiveagent`
 - **Repository**: github.com/thehiveagent/hive
-- **Current Version**: v0.1.8
+- **Current Version**: v0.2.2
 
 ## Tech Stack
 
@@ -58,6 +58,7 @@ node dist/cli/index.js <command>  # Test locally
 - **API keys**: Store via keytar only — never plaintext
 - **UI output**: Use `src/cli/ui.ts` — never raw chalk calls in command files
 - **Local communication**: Port `2718` for all TCP/daemon traffic. Daemon is managed via `hive daemon start/stop/restart/status/logs`
+- **Messaging integrations**: Run inside the daemon process and route all messages through the same agent + memory stack (TCP daemon port `2718` is the local IPC backbone)
 - **Provider interface**: All providers must implement `Provider` from `src/providers/base.ts`
 - **New commands**: Add to `src/cli/commands/`, register in `src/cli/index.ts`
 - **Database access**: Use helper functions in `src/storage/db.ts` — never raw SQL in command files
@@ -72,7 +73,24 @@ node dist/cli/index.js <command>  # Test locally
   ctx/              # hive-ctx databases
   daemon.pid        # daemon process lock
   daemon.log        # daemon output logs
+  integrations/
+    authorized.json  # per-platform allowlist
+    pending.json     # pending authorization requests
+    disabled.json    # disabled integrations toggle
+    whatsapp/
+      session/       # whatsapp-web.js session files
 ```
+
+## Messaging Integrations
+
+- CLI commands live under `hive integrations ...` (see `src/cli/commands/integrations.ts`).
+- Credentials are stored in keychain via keytar under service `hive` (never in files/db):
+  - `telegram` (bot token)
+  - `discord` (bot token), `discord_guild` (guild ID for slash commands)
+  - `slack` (JSON with bot/app token + signing secret)
+- Authorization allowlist lives at `~/.hive/integrations/authorized.json`.
+- Unknown senders are written to `~/.hive/integrations/pending.json` and surfaced in `hive` chat via `/permissions`.
+- Integrations start on daemon boot and are reported via daemon `status` as `integrations: { telegram, whatsapp, discord, slack }`.
 
 ## hive-ctx Submodule
 

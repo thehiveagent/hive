@@ -33,6 +33,16 @@ import { HiveAgent } from "../agent/agent.js";
 import type { Provider } from "../providers/base.js";
 import { createProvider } from "../providers/index.js";
 import { initializeHiveCtxSession, type HiveCtxSession } from "../agent/hive-ctx.js";
+import {
+  createMessageHandler,
+  type IntegrationPlatform,
+  isDisabled,
+  keychainGet,
+  startDiscordIntegration,
+  startSlackIntegration,
+  startTelegramIntegration,
+  startWhatsAppIntegration,
+} from "../integrations/index.js";
 
 const PORT = 2718;
 const HEARTBEAT_INTERVAL_MS = readEnvNumber("HIVE_DAEMON_HEARTBEAT_MS", 30000, 250); // 30s default
@@ -60,6 +70,19 @@ let heartbeatInterval: NodeJS.Timeout | null = null;
 let taskPollInterval: NodeJS.Timeout | null = null;
 let activeTaskId: string | null = null;
 const cancelledTaskIds = new Set<string>();
+
+// Integrations state
+type IntegrationStatus = "not configured" | "disabled" | "starting" | "running" | "error";
+const INTEGRATION_PLATFORMS: IntegrationPlatform[] = ["telegram", "whatsapp", "discord", "slack"];
+const integrationStatuses: Record<IntegrationPlatform, IntegrationStatus> = {
+  telegram: "not configured",
+  whatsapp: "not configured",
+  discord: "not configured",
+  slack: "not configured",
+};
+const integrationStops = new Map<IntegrationPlatform, () => Promise<void>>();
+const integrationRestartTimers = new Map<IntegrationPlatform, NodeJS.Timeout>();
+const INTEGRATION_RESTART_DELAY_MS = 30_000;
 
 function readEnvNumber(name: string, fallback: number, min: number): number {
   const raw = process.env[name];
@@ -233,6 +256,11 @@ async function initializeDaemon(): Promise<void> {
   }, HEARTBEAT_INTERVAL_MS);
 
   logToDaemonFile("Daemon initialization complete");
+
+  // Fire-and-forget integrations boot (never block daemon startup).
+  void startAllIntegrations().catch((error) => {
+    logToDaemonFile(`[integrations] boot error: ${String(error)}`);
+  });
 }
 
 /**
@@ -295,6 +323,9 @@ function handleCommand(command: string, socket: Socket): void {
       case "task_cancel":
         handleTaskCancel(parsed, socket);
         break;
+      case "integrations_reload":
+        void handleIntegrationsReload(socket);
+        break;
       default:
         sendResponse(socket, { error: `Unknown command type: ${parsed.type}` });
     }
@@ -343,10 +374,16 @@ function handleStatus(socket: Socket): void {
     taskWorker: {
       activeTaskId,
     },
+    integrations: integrationStatuses,
     timestamp: now,
   };
 
   sendResponse(socket, response);
+}
+
+async function handleIntegrationsReload(socket: Socket): Promise<void> {
+  sendResponse(socket, { ok: true });
+  await reloadIntegrations();
 }
 
 /**
@@ -440,6 +477,221 @@ function sendResponse(socket: Socket, data: Record<string, unknown>): void {
   }
 }
 
+function setIntegrationStatus(platform: IntegrationPlatform, status: IntegrationStatus): void {
+  integrationStatuses[platform] = status;
+}
+
+function clearRestartTimer(platform: IntegrationPlatform): void {
+  const timer = integrationRestartTimers.get(platform);
+  if (timer) {
+    clearTimeout(timer);
+    integrationRestartTimers.delete(platform);
+  }
+}
+
+function scheduleIntegrationRestart(platform: IntegrationPlatform, reason: string): void {
+  clearRestartTimer(platform);
+  setIntegrationStatus(platform, "error");
+  logToDaemonFile(`[integrations] ${platform} crashed: ${reason} (restart in 30s)`);
+  const timer = setTimeout(() => {
+    void startIntegration(platform).catch((error) => {
+      logToDaemonFile(`[integrations] ${platform} restart failed: ${String(error)}`);
+      scheduleIntegrationRestart(platform, String(error));
+    });
+  }, INTEGRATION_RESTART_DELAY_MS);
+  integrationRestartTimers.set(platform, timer);
+}
+
+async function stopIntegration(platform: IntegrationPlatform): Promise<void> {
+  clearRestartTimer(platform);
+  const stop = integrationStops.get(platform);
+  integrationStops.delete(platform);
+  if (stop) {
+    try {
+      await stop();
+    } catch (error) {
+      logToDaemonFile(`[integrations] stop ${platform} error: ${String(error)}`);
+    }
+  }
+}
+
+async function startAllIntegrations(): Promise<void> {
+  for (const platform of INTEGRATION_PLATFORMS) {
+    // eslint-disable-next-line no-await-in-loop
+    await startIntegration(platform);
+  }
+}
+
+async function reloadIntegrations(): Promise<void> {
+  logToDaemonFile("[integrations] reloading...");
+  for (const platform of INTEGRATION_PLATFORMS) {
+    // eslint-disable-next-line no-await-in-loop
+    await stopIntegration(platform);
+  }
+  await startAllIntegrations();
+  logToDaemonFile("[integrations] reload complete");
+}
+
+async function startIntegration(platform: IntegrationPlatform): Promise<void> {
+  await stopIntegration(platform);
+
+  if (isDisabled(platform)) {
+    setIntegrationStatus(platform, "disabled");
+    logToDaemonFile(`[integrations] ${platform} disabled`);
+    return;
+  }
+
+  if (!db) {
+    setIntegrationStatus(platform, "error");
+    logToDaemonFile(`[integrations] ${platform} cannot start: database unavailable`);
+    return;
+  }
+
+  const handler = createMessageHandler({
+    db,
+    hiveAgent,
+    ctx: ctxSession,
+    provider,
+    model: agent?.model ?? null,
+    log: (line) => logToDaemonFile(line),
+  });
+
+  const getStatusText = async (): Promise<string> => {
+    const now = Date.now();
+    const uptime = Math.floor((now - startTime) / 1000);
+    return `Daemon running · uptime ${uptime}s · agent ${agent?.agent_name ?? "not set"} · provider ${agent?.provider ?? "none"} · model ${agent?.model ?? "none"}`;
+  };
+
+  const getTasksText = async (): Promise<string> => {
+    if (!db) return "DB unavailable.";
+    const rows = db
+      .prepare(
+        `
+        SELECT id, title, status, created_at, error
+        FROM tasks
+        ORDER BY datetime(created_at) DESC
+        LIMIT 10
+      `,
+      )
+      .all() as Array<{ id: string; title: string; status: string; created_at: string; error?: string }>;
+
+    if (rows.length === 0) {
+      return "No tasks yet.";
+    }
+    return rows
+      .map((t) => `• ${t.status} · ${t.title}${t.error ? ` (${t.error})` : ""}`)
+      .join("\n");
+  };
+
+  setIntegrationStatus(platform, "starting");
+
+  try {
+    if (platform === "telegram") {
+      const token = await keychainGet("telegram");
+      if (!token) {
+        setIntegrationStatus(platform, "not configured");
+        return;
+      }
+
+      const running = await startTelegramIntegration({
+        token,
+        log: (line) => logToDaemonFile(line),
+        getStatusText,
+        getTasksText,
+        handleMessage: async (incoming) => {
+          const outgoing = await handler(incoming);
+          return { text: outgoing.text, replyTo: outgoing.replyTo, to: outgoing.to };
+        },
+      });
+
+      integrationStops.set(platform, running.stop);
+      setIntegrationStatus(platform, "running");
+      return;
+    }
+
+    if (platform === "whatsapp") {
+      const sessionDir = path.join(HIVE_HOME, "integrations", "whatsapp", "session");
+      // Treat session dir existence as "configured"
+      if (!fs.existsSync(sessionDir)) {
+        setIntegrationStatus(platform, "not configured");
+        return;
+      }
+
+      const running = await startWhatsAppIntegration({
+        sessionDir,
+        agentName: agent?.agent_name ?? "hive",
+        log: (line) => logToDaemonFile(line),
+        handleMessage: async (incoming) => {
+          const outgoing = await handler(incoming);
+          return { text: outgoing.text };
+        },
+      });
+
+      integrationStops.set(platform, running.stop);
+      setIntegrationStatus(platform, "running");
+      return;
+    }
+
+    if (platform === "discord") {
+      const token = await keychainGet("discord");
+      if (!token) {
+        setIntegrationStatus(platform, "not configured");
+        return;
+      }
+
+      const running = await startDiscordIntegration({
+        token,
+        log: (line) => logToDaemonFile(line),
+        handleIncoming: async (incoming, reply) => {
+          const outgoing = await handler(incoming);
+          await reply(outgoing.text);
+        },
+      });
+
+      integrationStops.set(platform, running.stop);
+      setIntegrationStatus(platform, "running");
+      return;
+    }
+
+    if (platform === "slack") {
+      const raw = await keychainGet("slack");
+      if (!raw) {
+        setIntegrationStatus(platform, "not configured");
+        return;
+      }
+
+      let tokens: any = null;
+      try {
+        tokens = JSON.parse(raw);
+      } catch {
+        tokens = null;
+      }
+
+      if (!tokens?.botToken) {
+        setIntegrationStatus(platform, "not configured");
+        return;
+      }
+
+      const running = await startSlackIntegration({
+        tokens,
+        log: (line) => logToDaemonFile(line),
+        getStatusText,
+        getTasksText,
+        handleIncoming: async (incoming) => {
+          const outgoing = await handler(incoming);
+          return outgoing.text;
+        },
+      });
+
+      integrationStops.set(platform, running.stop);
+      setIntegrationStatus(platform, "running");
+      return;
+    }
+  } catch (error) {
+    scheduleIntegrationRestart(platform, error instanceof Error ? error.message : String(error));
+  }
+}
+
 /**
  * Start TCP server
  */
@@ -488,6 +740,12 @@ async function startTcpServer(): Promise<void> {
  */
 async function cleanupAndExit(code: number): Promise<void> {
   logToDaemonFile(`Cleaning up and exiting with code ${code}`);
+
+  // Stop integrations
+  for (const platform of INTEGRATION_PLATFORMS) {
+    // eslint-disable-next-line no-await-in-loop
+    await stopIntegration(platform);
+  }
 
   // Clear heartbeat interval
   if (heartbeatInterval) {

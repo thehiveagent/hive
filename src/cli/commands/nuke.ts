@@ -72,6 +72,15 @@ export async function runNukeCommand(): Promise<void> {
     }
   }
 
+  // Integrations credentials (never stored on disk)
+  for (const account of ["telegram", "discord", "discord_guild", "slack"]) {
+    try {
+      await keytar.deletePassword(KEYCHAIN_SERVICE, account);
+    } catch {
+      // Ignore
+    }
+  }
+
   renderSuccess("The Hive has been nuked. Gone.");
 }
 
