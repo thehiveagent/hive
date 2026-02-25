@@ -1,6 +1,6 @@
 {
     "name": "@imisbahk/hive",
-    "version": "0.1.6",
+    "version": "0.1.8",
     "description": "Your agent. Always running. Always learning. Always working.",
     "type": "module",
     "bin": {
@@ -43,6 +43,13 @@
         "typecheck": "^0.1.2",
         "uuid": "^9.0.1"
     },
+    "files": [
+        "dist/",
+        "prompts/",
+        "README.md",
+        "LICENSE",
+        "AUTHORS.md"
+    ],
     "devDependencies": {
         "@eslint/js": "^10.0.1",
         "@types/better-sqlite3": "^7.6.8",

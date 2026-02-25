@@ -126,3 +126,50 @@ npm install -g @imisbahk/hive@0.1.3
 ```bash
 npm install -g @imisbahk/hive@0.1.4
 ```
+
+## 🐝 v0.1.6 — The Context Engine
+
+### What's in v0.1.6
+
+- `hive-ctx` integrated as the primary context pipeline (with legacy fallback when unavailable)
+- Knowledge graph + 3-tier memory + fingerprint compiler + weighted retrieval
+- Dedicated context storage at `~/.hive/ctx/`
+
+### Upgrade
+
+```bash
+npm install -g @imisbahk/hive@0.1.6
+```
+
+## 🐝 v0.1.7 — The Agent Lives
+
+### What's in v0.1.7
+
+- Background daemon with auto-restart via watcher process
+- Service registration: launchd (macOS), systemd (Linux), Task Scheduler (Windows)
+- TCP IPC on port 2718 + daemon health checks
+- `hive daemon ...` commands + stronger `hive doctor` diagnostics
+- Comprehensive test suite under `scripts/`
+
+### Upgrade
+
+```bash
+npm install -g @imisbahk/hive@0.1.7
+```
+
+## 🐝 v0.1.8 — Passive Memory
+
+### What's in v0.1.8
+
+- Passive memory extraction after each reply (no `/remember` required)
+- Auto-stored durable facts with `source=auto` + de-duplication by keyword overlap
+- Mood/emotion signals written into hive-ctx graph with temporal decay
+- Crystallization every 10 conversations into pinned long-term facts (skips if inactive >7 days)
+- `hive memory auto` + `/hive memory auto` to list auto-extracted facts with timestamps
+- `hive update` command to update the global CLI and warm prompt/context caches
+
+### Upgrade
+
+```bash
+npm install -g @imisbahk/hive@0.1.8
+```

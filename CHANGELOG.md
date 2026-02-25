@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.8 — Passive Memory
+
+- Passive memory extraction after each assistant reply (no `/remember` required)
+- Auto-stored durable facts with `source=auto` + de-duplication by keyword overlap
+- Mood/emotion signals stored into hive-ctx graph with temporal decay
+- Crystallization every 10 conversations into pinned long-term facts (skips if inactive >7 days)
+- `hive memory auto` + `/hive memory auto` to list auto-extracted facts with timestamps
+- `hive update` command to update the global CLI and warm prompt/context caches
+
 ## v0.1.7 — The Agent Lives
 
 - Background daemon with auto-restart via watcher process

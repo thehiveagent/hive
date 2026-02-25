@@ -8,6 +8,7 @@ import {
   getPrimaryAgent,
   insertKnowledge,
   listKnowledge,
+  listAutoKnowledge,
   openHiveDatabase,
   closeHiveDatabase,
 } from "../../storage/db.js";
@@ -31,6 +32,27 @@ export function registerMemoryCommand(program: Command): void {
         rows.forEach((row, index) => {
           const pinnedLabel = row.pinned ? " (pinned)" : "";
           renderInfo(`${index + 1}. ${row.content}${pinnedLabel}`);
+        });
+      } finally {
+        closeHiveDatabase(db);
+      }
+    });
+
+  memory
+    .command("auto")
+    .description("show automatically extracted facts")
+    .action(async () => {
+      const db = openHiveDatabase();
+      try {
+        const rows = listAutoKnowledge(db, 1000);
+        if (rows.length === 0) {
+          renderInfo("No auto-extracted facts yet.");
+          return;
+        }
+
+        rows.forEach((row, index) => {
+          const ts = row.created_at;
+          renderInfo(`${index + 1}. [auto] ${row.content} · ${ts}`);
         });
       } finally {
         closeHiveDatabase(db);

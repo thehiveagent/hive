@@ -54,10 +54,12 @@ export interface AppendMessageInput {
 export interface InsertKnowledgeInput {
   content: string;
   pinned?: boolean;
+  source?: string;
 }
 
 export interface ListKnowledgeOptions {
   limit?: number;
+  source?: string;
 }
 
 export interface UpdatePrimaryAgentProviderModelInput {
@@ -570,19 +572,21 @@ export function insertKnowledge(db: HiveDatabase, input: InsertKnowledgeInput): 
   const id = uuidv4();
   const timestamp = nowIso();
   const pinnedValue = input.pinned ? 1 : 0;
+  const sourceValue = input.source ?? "manual";
 
   db.prepare(
     `
-    INSERT INTO knowledge (id, content, created_at, pinned)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO knowledge (id, content, created_at, pinned, source)
+    VALUES (?, ?, ?, ?, ?)
   `,
-  ).run(id, input.content.trim(), timestamp, pinnedValue);
+  ).run(id, input.content.trim(), timestamp, pinnedValue, sourceValue);
 
   return {
     id,
     content: input.content.trim(),
     created_at: timestamp,
     pinned: pinnedValue,
+    source: sourceValue,
   };
 }
 
@@ -591,11 +595,40 @@ export function listKnowledge(
   options: ListKnowledgeOptions = {},
 ): KnowledgeRecord[] {
   const limit = options.limit ?? 100;
+  const sourceFilter = options.source;
+  if (sourceFilter) {
+    return db
+      .prepare(
+        `
+        SELECT id, content, created_at, pinned, source
+        FROM knowledge
+        WHERE source = ?
+        ORDER BY datetime(created_at) DESC
+        LIMIT ?
+      `,
+      )
+      .all(sourceFilter, limit) as KnowledgeRecord[];
+  }
+
   return db
     .prepare(
       `
-      SELECT id, content, created_at, pinned
+      SELECT id, content, created_at, pinned, source
       FROM knowledge
+      ORDER BY datetime(created_at) DESC
+      LIMIT ?
+    `,
+    )
+    .all(limit) as KnowledgeRecord[];
+}
+
+export function listAutoKnowledge(db: HiveDatabase, limit = 500): KnowledgeRecord[] {
+  return db
+    .prepare(
+      `
+      SELECT id, content, created_at, pinned, source
+      FROM knowledge
+      WHERE source = 'auto'
       ORDER BY datetime(created_at) DESC
       LIMIT ?
     `,
@@ -617,6 +650,7 @@ export function findClosestKnowledge(db: HiveDatabase, query: string): Knowledge
         content,
         created_at,
         pinned,
+        source,
         CASE WHEN content LIKE ? THEN 0 ELSE 1 END AS mismatch,
         ABS(LENGTH(content) - ?) AS length_diff
       FROM knowledge
@@ -637,6 +671,7 @@ export function findClosestKnowledge(db: HiveDatabase, query: string): Knowledge
     content: row.content,
     created_at: row.created_at,
     pinned: row.pinned,
+    source: row.source,
   };
 }
 
@@ -648,7 +683,7 @@ export function listPinnedKnowledge(db: HiveDatabase): KnowledgeRecord[] {
   return db
     .prepare(
       `
-      SELECT id, content, created_at, pinned
+      SELECT id, content, created_at, pinned, source
       FROM knowledge
       WHERE pinned = 1
       ORDER BY datetime(created_at) DESC

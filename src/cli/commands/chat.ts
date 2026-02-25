@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stdin, stdout } from "node:process";
 import * as readline from "node:readline";
@@ -7,7 +7,6 @@ import { spawnSync } from "node:child_process";
 
 import chalk from "chalk";
 import { Command } from "commander";
-import fetch from "node-fetch";
 import type { Provider, ProviderMessage } from "../../providers/base.js";
 
 import {
@@ -15,10 +14,12 @@ import {
   buildBrowserAugmentedPrompt,
   HiveAgent,
 } from "../../agent/agent.js";
+import { schedulePassiveMemory } from "../../agent/passive-memory.js";
 import {
   initializeHiveCtxSession,
   type HiveCtxSession,
 } from "../../agent/hive-ctx.js";
+import { maybeAutoUpdatePromptsOnBoot } from "../../agent/prompt-auto-update.js";
 import {
   closeHiveDatabase,
   deleteKnowledge,
@@ -26,6 +27,7 @@ import {
   type HiveDatabase,
   getPrimaryAgent,
   getHiveHomeDir,
+  listAutoKnowledge,
   insertKnowledge,
   listKnowledge,
   type KnowledgeRecord,
@@ -44,6 +46,12 @@ import {
   renderSeparator,
   renderSuccess,
 } from "../ui.js";
+import {
+  fetchLatestVersion,
+  getLocalVersion,
+  isMinorJump,
+  isVersionNewer,
+} from "../helpers/version.js";
 import { openPage } from "../../browser/browser.js";
 import {
   runConfigKeyCommandWithOptions,
@@ -108,6 +116,7 @@ const COMMAND_HELP_TEXT = [
   "  /retry           resend last message",
   "  /copy            copy last reply",
   "  /hive memory list  show knowledge items",
+  "  /hive memory auto  show auto-extracted facts",
   "  /hive memory clear clear episodic memory",
   "  /hive memory show  show current persona",
   "  /browse <url>   read a webpage",
@@ -122,6 +131,7 @@ const COMMAND_HELP_TEXT = [
   "  /hive config key interactive key setup",
   "  /hive config theme interactive theme setup",
   "  /exit           quit",
+  "  /quit           quit",
 ].join("\n");
 const HIVE_SHORTCUT_HELP_TEXT = [
   "Hive shortcuts:",
@@ -129,6 +139,7 @@ const HIVE_SHORTCUT_HELP_TEXT = [
   "  /hive status       run hive status",
   "  /hive config show  run hive config show",
   "  /hive memory list  list knowledge",
+  "  /hive memory auto  list auto facts",
   "  /hive memory clear clear episodes",
   "  /hive memory show  show persona",
   "",
@@ -363,6 +374,10 @@ export async function runChatCommand(
       return;
     }
 
+    await maybeAutoUpdatePromptsOnBoot(db, (message) => {
+      console.log(chalk.dim(message));
+    });
+
     let activeProfile = profile;
     const model = options.model ?? activeProfile.model;
     const ctxStoragePath = join(getHiveHomeDir(), "ctx");
@@ -411,6 +426,8 @@ export async function runChatCommand(
       lastUserPromptRef.value = options.message;
       const streamResult = await streamReply({
         agent,
+        provider,
+        db,
         prompt: augmentedMessage,
         rawPrompt: options.message,
         conversationId,
@@ -542,6 +559,8 @@ export async function runChatCommand(
 
         const streamResult = await streamReply({
           agent,
+          provider,
+          db,
           prompt: augmentedPrompt,
           rawPrompt: prompt,
           conversationId,
@@ -569,6 +588,8 @@ interface StreamResult {
 async function streamReply(
   input: {
     agent: HiveAgent;
+    provider: Provider;
+    db: HiveDatabase;
     prompt: string;
     rawPrompt: string;
     conversationId: string | undefined;
@@ -601,13 +622,13 @@ async function streamReply(
   let ctxSystemPrompt: string | undefined;
   let ctxTokenCount: number | undefined;
 
-  if (input.hiveCtx) {
-    const context = await input.hiveCtx.build(input.rawPrompt);
-    ctxSystemPrompt = context.system;
-    ctxTokenCount = context.tokens;
-  }
-
   try {
+    if (input.hiveCtx) {
+      const context = await input.hiveCtx.build(input.rawPrompt);
+      ctxSystemPrompt = context.system;
+      ctxTokenCount = context.tokens;
+    }
+
     for await (const event of input.agent.chat(input.prompt, {
       conversationId: activeConversationId,
       model: input.options.model,
@@ -664,6 +685,15 @@ async function streamReply(
   if (!activeConversationId) {
     throw new Error("Conversation state was not returned by the agent.");
   }
+
+  schedulePassiveMemory({
+    db: input.db,
+    provider: input.provider,
+    model: input.options.model ?? input.agent.getProfile().model,
+    userMessage: input.rawPrompt,
+    assistantMessage: assistantText,
+    hiveCtx: input.hiveCtx,
+  });
 
   return { conversationId: activeConversationId, assistantText };
 }
@@ -897,6 +927,26 @@ async function handleHiveShortcut(
     rows.forEach((row, index) => {
       const pinnedLabel = row.pinned ? " (pinned)" : "";
       renderInfo(`${index + 1}. ${row.content}${pinnedLabel}`);
+    });
+    return "handled";
+  }
+
+  if (subcommand === "memory auto") {
+    const db = options.db;
+    if (!db) {
+      renderError("Memory commands unavailable: database not open.");
+      return "handled";
+    }
+
+    const autos = listAutoKnowledge(db, 1000);
+    if (autos.length === 0) {
+      renderInfo("No auto-extracted facts yet.");
+      return "handled";
+    }
+
+    autos.forEach((row, index) => {
+      const ts = row.created_at;
+      renderInfo(`${index + 1}. [auto] ${row.content} · ${ts}`);
     });
     return "handled";
   }
@@ -1279,6 +1329,8 @@ async function handleChatSlashCommand(input: {
 
     const retryResult = await streamReply({
       agent: input.agent,
+      provider: input.provider,
+      db: input.db,
       prompt: userPrompt,
       rawPrompt: userPrompt,
       conversationId: input.conversationId,
@@ -1323,66 +1375,19 @@ function copyToClipboard(text: string): boolean {
   return result.status === 0;
 }
 
-let cachedLocalVersion: string | null = null;
-
 async function checkForUpdates(): Promise<void> {
   try {
-    const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("timeout")), 3000),
-    );
-
-    const latest = (await Promise.race([
-      fetch("https://registry.npmjs.org/@imisbahk/hive/latest").then((response) => response.json()),
-      timeout,
-    ])) as { version?: string } | undefined;
-
-    if (!latest?.version || typeof latest.version !== "string") {
-      return;
-    }
+    const latest = await fetchLatestVersion();
+    if (!latest) return;
 
     const localVersion = getLocalVersion();
-    if (isVersionNewer(latest.version, localVersion)) {
+    if (isVersionNewer(latest, localVersion) && isMinorJump(latest, localVersion)) {
       const amber = chalk.hex("#ffbf00");
-      console.log(amber.dim(`✦ Update available v${localVersion} → npm update -g @imisbahk/hive`));
+      console.log(amber.dim(`✦ Update available v${latest} → run hive update`));
     }
   } catch {
     // Silently ignore update check failures.
   }
-}
-
-function getLocalVersion(): string {
-  if (cachedLocalVersion) {
-    return cachedLocalVersion;
-  }
-
-  try {
-    const raw = readFileSync(new URL("../../../package.json", import.meta.url), "utf8");
-    const parsed = JSON.parse(raw) as { version?: string };
-    if (parsed.version) {
-      cachedLocalVersion = parsed.version;
-      return cachedLocalVersion;
-    }
-  } catch {
-    // ignore
-  }
-
-  cachedLocalVersion = "0.0.0";
-  return cachedLocalVersion;
-}
-
-function isVersionNewer(remote: string, local: string): boolean {
-  const toNumbers = (value: string) => value.split(".").map((part) => Number.parseInt(part, 10));
-  const r = toNumbers(remote);
-  const l = toNumbers(local);
-  const length = Math.max(r.length, l.length);
-
-  for (let index = 0; index < length; index += 1) {
-    const rv = r[index] ?? 0;
-    const lv = l[index] ?? 0;
-    if (rv > lv) return true;
-    if (rv < lv) return false;
-  }
-  return false;
 }
 
 function getCommandSuggestions(input: string): CommandSuggestion[] {

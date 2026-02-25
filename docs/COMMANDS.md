@@ -1,4 +1,4 @@
-# Commands (v0.1.7)
+# Commands (v0.1.8)
 
 This document describes the CLI commands and in-chat slash commands implemented in this repository.
 
@@ -110,14 +110,25 @@ Manage stored knowledge and episodic memory without leaving the CLI.
 
 Subcommands:
 - `hive memory list`: show all knowledge graph entries (pinned marked)
+- `hive memory auto`: show automatically extracted facts (source `auto`) with timestamps
 - `hive memory clear`: delete all episodic memories (prompts for confirmation)
 - `hive memory show`: print the current persona
 
 Examples:
 ```bash
 hive memory list
+hive memory auto
 hive memory clear
 hive memory show
+```
+
+### `hive update`
+
+Updates the globally installed Hive CLI to the latest published version (npm), then syncs missing prompts and warms the context cache when possible.
+
+Example:
+```bash
+hive update
 ```
 
 ### `hive nuke`
@@ -244,4 +255,3 @@ Individual component tests can also be run separately:
 - `npx ts-node scripts/test-memory.ts` — Tests episodic memory and recall
 - `npx ts-node scripts/test-theme.ts` — Tests CLI UI theme configurator
 - `npx ts-node scripts/test-prompts.ts` — Tests prompt generation and defaults
-

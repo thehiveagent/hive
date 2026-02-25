@@ -12,6 +12,8 @@ import { registerInitCommand } from "./commands/init.js";
 import { registerMemoryCommand } from "./commands/memory.js";
 import { registerNukeCommand } from "./commands/nuke.js";
 import { registerStatusCommand } from "./commands/status.js";
+import { registerUpdateCommand } from "./commands/update.js";
+import { getLocalVersion } from "./helpers/version.js";
 import { renderError, renderHiveHeader } from "./ui.js";
 
 const program = new Command();
@@ -19,7 +21,7 @@ const program = new Command();
 program
   .name("hive")
   .description("Your agent. Always running. Always learning. Always working.")
-  .version("0.1.4");
+  .version(getLocalVersion());
 
 registerInitCommand(program);
 registerChatCommand(program);
@@ -29,6 +31,7 @@ registerDoctorCommand(program);
 registerStatusCommand(program);
 registerNukeCommand(program);
 registerMemoryCommand(program);
+registerUpdateCommand(program);
 
 const argv = process.argv.slice(2);
 

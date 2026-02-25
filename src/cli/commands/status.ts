@@ -25,7 +25,7 @@ import {
 const KEYCHAIN_SERVICE = "hive";
 const PROMPTS_DIRECTORY = "prompts";
 const DEFAULT_PORT = 2718;
-const TCP_TIMEOUT_MS = 3000;
+const TCP_TIMEOUT_MS = 500;
 
 interface StatusCommandRenderOptions {
   showHeader?: boolean;
