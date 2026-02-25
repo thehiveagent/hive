@@ -135,6 +135,28 @@ hive memory clear
 hive memory show
 ```
 
+### `hive task`
+
+Queue and manage background tasks processed by the daemon worker.
+
+Subcommands:
+
+- `hive task add "<description>"`: queue a new task
+- `hive task list`: list all tasks grouped by status
+- `hive task checkout <id>`: show full result for a completed task
+- `hive task cancel <id>`: cancel a queued/running task
+- `hive task clear`: delete done/failed tasks (keeps queued/running)
+
+Examples:
+
+```bash
+hive task add "research best p2p frameworks"
+hive task list
+hive task checkout t-a3f9c2
+hive task cancel t-a3f9c2
+hive task clear
+```
+
 ### `hive update`
 
 Updates the globally installed Hive CLI to the latest published version (npm), then syncs missing prompts and warms the context cache when possible.
@@ -167,6 +189,8 @@ These commands are available inside the interactive chat UI (`hive`).
 - `/clear`: clear the terminal while staying in the same conversation
 - `/status`: print mode, provider, model, and conversation id inline
 - `/daemon`: print current daemon status in chat
+- `/tasks`: list background tasks
+- `/task <desc>`: queue a background task
 
 Examples:
 
@@ -176,6 +200,8 @@ Examples:
 /exit
 /status
 /daemon
+/tasks
+/task research best rust p2p libraries
 /clear
 ```
 

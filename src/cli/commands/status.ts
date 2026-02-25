@@ -15,6 +15,7 @@ import {
   getMetaValue,
   getPrimaryAgent,
   openHiveDatabase,
+  countTasksByStatus,
 } from "../../storage/db.js";
 
 const KEYCHAIN_SERVICE = "hive";
@@ -63,6 +64,7 @@ export async function runStatusCommandWithOptions(
     const dbSizeBytes = getFileSize(dbPath);
     const promptFiles = countFiles(promptsPath);
     const initializedRaw = getMetaValue(db, "initialized_at") ?? agent.created_at;
+    const taskCounts = countTasksByStatus(db);
 
     if (showHeader) {
       renderStep("Status");
@@ -81,6 +83,10 @@ export async function runStatusCommandWithOptions(
     );
     renderSeparator();
     printStatusLine("Initialized", formatDate(initializedRaw));
+    printStatusLine(
+      "Tasks",
+      `${taskCounts.queued} queued · ${taskCounts.running} running · ${taskCounts.done} done`,
+    );
     printStatusLine("Daemon", await getDaemonStatusLine());
   } finally {
     closeHiveDatabase(db);

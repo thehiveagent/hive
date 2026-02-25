@@ -113,9 +113,7 @@ export class OpenAICompatibleProvider implements Provider {
 
     const message = error.message.toLowerCase();
     const is400 =
-      message.includes("http 400") ||
-      message.includes("status 400") ||
-      message.includes(" 400 ");
+      message.includes("http 400") || message.includes("status 400") || message.includes(" 400 ");
 
     return is400 && message.includes("tool_use_failed");
   }

@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
@@ -20,14 +21,18 @@ import { initializeHiveCtxSession, type HiveCtxSession } from "../../agent/hive-
 import { maybeAutoUpdatePromptsOnBoot } from "../../agent/prompt-auto-update.js";
 import {
   closeHiveDatabase,
+  getMetaValue,
   deleteKnowledge,
   findClosestKnowledge,
   type HiveDatabase,
   getPrimaryAgent,
   getHiveHomeDir,
+  insertTask,
   listAutoKnowledge,
   insertKnowledge,
   listKnowledge,
+  listTasks,
+  setMetaValue,
   type KnowledgeRecord,
   type MessageRecord,
   listConversationMessages,
@@ -50,6 +55,7 @@ import {
   isMinorJump,
   isVersionNewer,
 } from "../helpers/version.js";
+import { formatRelativeTime, groupTasks } from "../helpers/tasks.js";
 import {
   runConfigKeyCommandWithOptions,
   runConfigModelCommandWithOptions,
@@ -98,6 +104,8 @@ const COMMAND_HELP_TEXT = [
   "  /help           show commands",
   "  /new            start a new conversation",
   "  /daemon         show daemon status",
+  "  /tasks          list background tasks",
+  "  /task <desc>    queue a background task",
   "  /remember <fact> save a fact",
   "  /forget <thing>  delete closest fact",
   "  /pin <fact>      pin fact into context",
@@ -181,6 +189,16 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
     label: "/daemon",
     insertText: "/daemon",
     description: "show daemon status",
+  },
+  {
+    label: "/tasks",
+    insertText: "/tasks",
+    description: "list background tasks",
+  },
+  {
+    label: "/task <desc>",
+    insertText: "/task ",
+    description: "queue a background task",
   },
   {
     label: "/remember <fact>",
@@ -380,6 +398,9 @@ export async function runChatCommand(
       renderError("Hive is not initialized. Run `hive init` first.");
       return;
     }
+
+    notifyCompletedTasksSinceLastSession(db);
+    setMetaValue(db, "last_session_at", new Date().toISOString());
 
     void maybeAutoUpdatePromptsOnBoot(db, (message) => {
       console.log(chalk.dim(message));
@@ -756,6 +777,43 @@ function renderAmberError(message: string): void {
   console.error(amber(`✗ ${message}`));
 }
 
+function notifyCompletedTasksSinceLastSession(db: HiveDatabase): void {
+  const last = getMetaValue(db, "last_session_at");
+  if (!last) {
+    return;
+  }
+
+  const lastTs = Date.parse(last);
+  if (!Number.isFinite(lastTs)) {
+    return;
+  }
+
+  try {
+    const row = db
+      .prepare(
+        `
+        SELECT COUNT(1) AS count
+        FROM tasks
+        WHERE status IN ('done','failed')
+          AND completed_at IS NOT NULL
+          AND datetime(completed_at) > datetime(?)
+      `,
+      )
+      .get(last) as { count: number } | undefined;
+
+    const count = row?.count ?? 0;
+    if (count <= 0) {
+      return;
+    }
+
+    const amber = chalk.hex("#ffbf00");
+    console.log(amber.dim(`✦ ${count} tasks completed since your last session`));
+    console.log(chalk.dim("· run /tasks to view"));
+  } catch {
+    // ignore
+  }
+}
+
 function resolveAgentName(agentName: string | null | undefined): string {
   const normalized = agentName?.trim();
   if (normalized && normalized.length > 0) {
@@ -866,6 +924,9 @@ function isUnknownSlashCommand(prompt: string): boolean {
     normalized === "/help" ||
     normalized === "/new" ||
     normalized === "/daemon" ||
+    normalized === "/tasks" ||
+    normalized === "/task" ||
+    normalized.startsWith("/task ") ||
     normalized === "/exit" ||
     normalized === "/quit" ||
     normalized === "/remember" ||
@@ -1219,6 +1280,57 @@ async function handleChatSlashCommand(input: {
     return true;
   }
 
+  if (lower === "/tasks") {
+    const tasks = listTasks(input.db);
+    if (tasks.length === 0) {
+      renderInfo("No tasks yet.");
+      input.lastUserPromptRef.value = null;
+      return true;
+    }
+
+    const grouped = groupTasks(tasks);
+    renderInfo("◆ Tasks");
+    renderSeparator();
+    renderInfo(`Running (${grouped.running.length})`);
+    grouped.running.forEach((task) => {
+      renderInfo(`· ${task.id}  ${task.title}  started ${formatRelativeTime(task.started_at)}`);
+    });
+    renderInfo("");
+    renderInfo(`Queued (${grouped.queued.length})`);
+    grouped.queued.forEach((task) => {
+      renderInfo(`· ${task.id}  ${task.title}`);
+    });
+    renderInfo("");
+    renderInfo(`Done (${grouped.done.length})`);
+    grouped.done.forEach((task) => {
+      renderInfo(`· ${task.id}  ✓ ${task.title}  ${formatRelativeTime(task.completed_at)}`);
+    });
+    renderInfo("");
+    renderInfo(`Failed (${grouped.failed.length})`);
+    grouped.failed.forEach((task) => {
+      const tail = task.error ? ` · ${task.error}` : "";
+      renderInfo(`· ${task.id}  ✗ ${task.title}  ${formatRelativeTime(task.completed_at)}${tail}`);
+    });
+    input.lastUserPromptRef.value = null;
+    return true;
+  }
+
+  if (lower.startsWith("/task ")) {
+    const title = normalized.slice("/task".length).trim();
+    if (!title) {
+      renderError("Usage: /task <description>");
+      return true;
+    }
+
+    const agentId = getPrimaryAgent(input.db)?.id ?? null;
+    const id = createTaskId();
+    insertTask(input.db, { id, title, agentId });
+    void sendDaemonCommandInline({ type: "task", payload: { id, title, agent_id: agentId } });
+    renderSuccess(`✓ Task queued · ${id}`);
+    input.lastUserPromptRef.value = null;
+    return true;
+  }
+
   if (lower.startsWith("/remember")) {
     const fact = normalized.slice("/remember".length).trim();
     if (fact.length === 0) {
@@ -1498,6 +1610,30 @@ async function handleChatSlashCommand(input: {
   }
 
   return false;
+}
+
+function createTaskId(): string {
+  const hex = crypto.randomUUID().replace(/-/g, "").slice(0, 6);
+  return `t-${hex}`;
+}
+
+async function sendDaemonCommandInline(payload: Record<string, unknown>): Promise<void> {
+  const home = getHiveHomeDir();
+  const portFile = join(home, "daemon.port");
+  const port = readNumberFromFile(portFile) ?? 2718;
+
+  await new Promise<void>((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port }, () => {
+      socket.write(JSON.stringify(payload) + "\n");
+    });
+
+    socket.on("error", () => resolve());
+    socket.setTimeout(500, () => {
+      socket.destroy();
+      resolve();
+    });
+    socket.on("close", () => resolve());
+  });
 }
 
 function copyToClipboard(text: string): boolean {

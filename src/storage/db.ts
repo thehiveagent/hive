@@ -15,6 +15,8 @@ import {
   type MessageRecord,
   type MessageRole,
   type MetaRecord,
+  type TaskRecord,
+  type TaskStatus,
 } from "./schema.js";
 
 export type HiveDatabase = Database.Database;
@@ -26,6 +28,8 @@ export type {
   MessageRecord,
   MessageRole,
   MetaRecord,
+  TaskRecord,
+  TaskStatus,
 } from "./schema.js";
 
 export interface UpsertAgentInput {
@@ -77,6 +81,12 @@ export interface ConversationSummary {
 export interface RelevantEpisode {
   episode: EpisodeRecord;
   score: number;
+}
+
+export interface InsertTaskInput {
+  id: string;
+  title: string;
+  agentId?: string | null;
 }
 
 export const HIVE_DIRECTORY_NAME = ".hive";
@@ -747,4 +757,192 @@ export function findRelevantEpisodes(
 
 export function clearEpisodes(db: HiveDatabase): void {
   db.exec("DELETE FROM episodes");
+}
+
+export function insertTask(db: HiveDatabase, input: InsertTaskInput): TaskRecord {
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+    INSERT OR IGNORE INTO tasks (
+      id,
+      title,
+      status,
+      result,
+      created_at,
+      started_at,
+      completed_at,
+      agent_id,
+      error
+    )
+    VALUES (?, ?, 'queued', NULL, ?, NULL, NULL, ?, NULL)
+  `,
+  ).run(input.id, input.title.trim(), timestamp, input.agentId ?? null);
+
+  const row = getTaskById(db, input.id);
+  if (!row) {
+    // Shouldn't happen unless the DB is read-only or corrupted.
+    throw new Error("Task insert failed.");
+  }
+  return row;
+}
+
+export function getTaskById(db: HiveDatabase, id: string): TaskRecord | null {
+  const row = db
+    .prepare(
+      `
+      SELECT
+        id,
+        title,
+        status,
+        result,
+        created_at,
+        started_at,
+        completed_at,
+        agent_id,
+        error
+      FROM tasks
+      WHERE id = ?
+    `,
+    )
+    .get(id) as TaskRecord | undefined;
+
+  return row ?? null;
+}
+
+export function listTasks(db: HiveDatabase): TaskRecord[] {
+  return db
+    .prepare(
+      `
+      SELECT
+        id,
+        title,
+        status,
+        result,
+        created_at,
+        started_at,
+        completed_at,
+        agent_id,
+        error
+      FROM tasks
+      ORDER BY
+        CASE status
+          WHEN 'running' THEN 0
+          WHEN 'queued' THEN 1
+          WHEN 'done' THEN 2
+          WHEN 'failed' THEN 3
+          ELSE 4
+        END,
+        datetime(created_at) DESC
+    `,
+    )
+    .all() as TaskRecord[];
+}
+
+export function countTasksByStatus(db: HiveDatabase): Record<TaskStatus, number> {
+  const rows = db
+    .prepare(
+      `
+      SELECT status, COUNT(1) AS count
+      FROM tasks
+      GROUP BY status
+    `,
+    )
+    .all() as Array<{ status: TaskStatus; count: number }>;
+
+  return rows.reduce(
+    (acc, row) => {
+      acc[row.status] = row.count;
+      return acc;
+    },
+    { queued: 0, running: 0, done: 0, failed: 0 } as Record<TaskStatus, number>,
+  );
+}
+
+export function claimNextQueuedTask(db: HiveDatabase): TaskRecord | null {
+  const row = db
+    .prepare(
+      `
+      SELECT
+        id,
+        title,
+        status,
+        result,
+        created_at,
+        started_at,
+        completed_at,
+        agent_id,
+        error
+      FROM tasks
+      WHERE status = 'queued'
+      ORDER BY datetime(created_at) ASC
+      LIMIT 1
+    `,
+    )
+    .get() as TaskRecord | undefined;
+
+  return row ?? null;
+}
+
+export function resetRunningTasksToQueued(db: HiveDatabase): number {
+  const info = db
+    .prepare(
+      `
+      UPDATE tasks
+      SET status = 'queued', started_at = NULL, completed_at = NULL, error = NULL
+      WHERE status = 'running'
+    `,
+    )
+    .run();
+
+  return Number(info.changes ?? 0);
+}
+
+export function markTaskRunning(db: HiveDatabase, id: string): void {
+  db.prepare(
+    `
+    UPDATE tasks
+    SET status = 'running', started_at = ?, completed_at = NULL, error = NULL
+    WHERE id = ?
+  `,
+  ).run(nowIso(), id);
+}
+
+export function markTaskDone(db: HiveDatabase, id: string, result: string): void {
+  db.prepare(
+    `
+    UPDATE tasks
+    SET status = 'done', result = ?, completed_at = ?, error = NULL
+    WHERE id = ?
+  `,
+  ).run(result, nowIso(), id);
+}
+
+export function markTaskFailed(db: HiveDatabase, id: string, error: string): void {
+  db.prepare(
+    `
+    UPDATE tasks
+    SET status = 'failed', error = ?, completed_at = ?, result = NULL
+    WHERE id = ?
+  `,
+  ).run(error, nowIso(), id);
+}
+
+export function cancelTask(db: HiveDatabase, id: string): boolean {
+  const row = getTaskById(db, id);
+  if (!row) {
+    return false;
+  }
+
+  if (row.status !== "queued" && row.status !== "running") {
+    return false;
+  }
+
+  markTaskFailed(db, id, "cancelled");
+  return true;
+}
+
+export function clearCompletedTasks(db: HiveDatabase): number {
+  const info = db.prepare("DELETE FROM tasks WHERE status IN ('done','failed')").run();
+  return Number(info.changes ?? 0);
 }

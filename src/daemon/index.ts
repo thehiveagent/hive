@@ -17,17 +17,27 @@ import * as path from "node:path";
 import { createServer, type Server, type Socket } from "node:net";
 import {
   closeHiveDatabase,
+  claimNextQueuedTask,
   getHiveHomeDir,
   getPrimaryAgent,
+  insertTask,
+  markTaskDone,
+  markTaskFailed,
+  markTaskRunning,
   openHiveDatabase,
+  resetRunningTasksToQueued,
+  type TaskRecord,
   type HiveDatabase,
 } from "../storage/db.js";
-import { initializeHiveCtxSession } from "../agent/hive-ctx.js";
+import { HiveAgent } from "../agent/agent.js";
+import { createProvider } from "../providers/index.js";
+import { initializeHiveCtxSession, type HiveCtxSession } from "../agent/hive-ctx.js";
 
 const PORT = 2718;
 const HEARTBEAT_INTERVAL_MS = readEnvNumber("HIVE_DAEMON_HEARTBEAT_MS", 30000, 250); // 30s default
 const LOG_MAX_SIZE = 10 * 1024 * 1024; // 10MB
 const LOG_MAX_FILES = 3;
+const TASK_POLL_INTERVAL_MS = 10_000;
 
 const HIVE_HOME = getHiveHomeDir();
 const DAEMON_PID_FILE = path.join(HIVE_HOME, "daemon.pid");
@@ -41,9 +51,12 @@ const DAEMON_CTX_PATH = path.join(HIVE_HOME, "ctx");
 let startTime: number;
 let db: HiveDatabase | null = null;
 let agent: ReturnType<typeof getPrimaryAgent> | null = null;
-let ctxSession: unknown | null = null;
+let ctxSession: HiveCtxSession | null = null;
 let tcpServer: Server | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
+let taskPollInterval: NodeJS.Timeout | null = null;
+let activeTaskId: string | null = null;
+const cancelledTaskIds = new Set<string>();
 
 function readEnvNumber(name: string, fallback: number, min: number): number {
   const raw = process.env[name];
@@ -157,6 +170,7 @@ async function initializeDaemon(): Promise<void> {
   // Open database
   logToDaemonFile("Opening database...");
   db = openHiveDatabase();
+  resetRunningTasksToQueued(db);
 
   // Load agent profile
   logToDaemonFile("Loading agent profile...");
@@ -265,6 +279,9 @@ function handleCommand(command: string, socket: Socket): void {
       case "task":
         handleTask(parsed, socket);
         break;
+      case "task_cancel":
+        handleTaskCancel(parsed, socket);
+        break;
       default:
         sendResponse(socket, { error: `Unknown command type: ${parsed.type}` });
     }
@@ -310,6 +327,9 @@ function handleStatus(socket: Socket): void {
     model: agent?.model ?? "none",
     memoryStats,
     ctxEnabled: !!ctxSession,
+    taskWorker: {
+      activeTaskId,
+    },
     timestamp: now,
   };
 
@@ -345,13 +365,53 @@ function handleStop(socket: Socket): void {
 }
 
 /**
- * Handle task command (stub for v0.2)
+ * Handle task command
  */
-function handleTask(parsed: any, socket: Socket): void {
-  sendResponse(socket, {
-    accepted: true,
-    taskId: `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-  });
+function handleTask(
+  parsed: { payload?: { id?: string; title?: string; agent_id?: string | null } },
+  socket: Socket,
+): void {
+  if (!db) {
+    sendResponse(socket, { accepted: false, error: "database unavailable" });
+    return;
+  }
+
+  const id = parsed.payload?.id;
+  const title = parsed.payload?.title;
+  if (!id || !title) {
+    sendResponse(socket, { accepted: false, error: "missing task id/title" });
+    return;
+  }
+
+  try {
+    insertTask(db, { id, title, agentId: parsed.payload?.agent_id ?? agent?.id ?? null });
+    sendResponse(socket, { accepted: true, id });
+    void tickTaskWorker();
+  } catch (error) {
+    sendResponse(socket, { accepted: false, error: String(error) });
+  }
+}
+
+function handleTaskCancel(parsed: { id?: string }, socket: Socket): void {
+  if (!db) {
+    sendResponse(socket, { ok: false, error: "database unavailable" });
+    return;
+  }
+
+  const id = parsed.id;
+  if (!id) {
+    sendResponse(socket, { ok: false, error: "missing id" });
+    return;
+  }
+
+  cancelledTaskIds.add(id);
+
+  try {
+    markTaskFailed(db, id, "cancelled");
+    sendResponse(socket, { ok: true });
+  } catch (error) {
+    sendResponse(socket, { ok: false, error: String(error) });
+  }
 }
 
 /**
@@ -421,6 +481,11 @@ async function cleanupAndExit(code: number): Promise<void> {
     heartbeatInterval = null;
   }
 
+  if (taskPollInterval) {
+    clearInterval(taskPollInterval);
+    taskPollInterval = null;
+  }
+
   // Close TCP server
   if (tcpServer) {
     tcpServer.close(() => {
@@ -454,6 +519,7 @@ async function main(): Promise<void> {
   await startTcpServer();
 
   logToDaemonFile("Daemon is running. Press Ctrl+C to stop.");
+  startTaskWorker();
 
   // Handle signals
   process.on("SIGTERM", () => {
@@ -472,3 +538,86 @@ main().catch((error) => {
   logToDaemonFile(`Fatal error: ${error.message}`);
   process.exit(1);
 });
+
+function startTaskWorker(): void {
+  taskPollInterval = setInterval(() => {
+    void tickTaskWorker().catch((error) => {
+      logToDaemonFile(`Task worker error: ${String(error)}`);
+    });
+  }, TASK_POLL_INTERVAL_MS);
+
+  // Kick immediately on boot.
+  void tickTaskWorker().catch((error) => {
+    logToDaemonFile(`Task worker error: ${String(error)}`);
+  });
+}
+
+async function tickTaskWorker(): Promise<void> {
+  if (!db || !agent) {
+    return;
+  }
+
+  if (activeTaskId) {
+    return;
+  }
+
+  while (true) {
+    const next = claimNextQueuedTask(db);
+    if (!next) {
+      return;
+    }
+
+    activeTaskId = next.id;
+    try {
+      await runTask(next);
+    } finally {
+      activeTaskId = null;
+    }
+  }
+}
+
+async function runTask(task: TaskRecord): Promise<void> {
+  if (!db || !agent) {
+    return;
+  }
+
+  if (cancelledTaskIds.has(task.id)) {
+    markTaskFailed(db, task.id, "cancelled");
+    cancelledTaskIds.delete(task.id);
+    return;
+  }
+
+  markTaskRunning(db, task.id);
+
+  try {
+    const provider = await createProvider(agent.provider);
+    const hiveAgent = new HiveAgent(db, provider, agent);
+
+    const context = ctxSession ? await ctxSession.build(task.title) : null;
+    let assistantText = "";
+
+    for await (const event of hiveAgent.chat(task.title, {
+      title: `Task ${task.id}`,
+      contextSystemPrompt: context?.system,
+      disableLegacyEpisodeStore: Boolean(ctxSession),
+    })) {
+      if (cancelledTaskIds.has(task.id)) {
+        throw new Error("cancelled");
+      }
+      if (event.type === "token") {
+        assistantText += event.token;
+      }
+    }
+
+    if (ctxSession) {
+      await Promise.resolve(ctxSession.episode(task.title, assistantText)).catch(() => {});
+    }
+
+    markTaskDone(db, task.id, assistantText);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    markTaskFailed(db, task.id, message);
+  } finally {
+    cancelledTaskIds.delete(task.id);
+  }
+}

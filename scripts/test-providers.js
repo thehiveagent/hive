@@ -48,14 +48,12 @@ async function main() {
       const openai = await createProvider("openai");
 
       check(
-        "Provider supportsTools flag correct per provider (ollama: false, groq: false, others: true)",
-        ollama.supportsTools === false &&
-          groq.supportsTools === false &&
-          openai.supportsTools === true,
+        "Provider supportsTools flag correct per provider (ollama: false, groq: true, others: true)",
+        ollama.supportsTools === false && groq.supportsTools === true && openai.supportsTools === true,
       );
     } catch (e) {
       check(
-        "Provider supportsTools flag correct per provider (ollama: false, groq: false, others: true)",
+        "Provider supportsTools flag correct per provider (ollama: false, groq: true, others: true)",
         false,
         e?.message ?? String(e),
       );

@@ -8,7 +8,7 @@ export interface SchemaMigration {
   sql: string;
 }
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 const initialSchemaSql = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -112,6 +112,26 @@ ALTER TABLE knowledge ADD COLUMN source TEXT DEFAULT 'manual';
 UPDATE knowledge SET source = 'manual' WHERE source IS NULL;
 `,
   },
+  {
+    version: 6,
+    name: "v6_tasks_table",
+    sql: `
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'done', 'failed')),
+  result TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT,
+  agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+  error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at ON tasks(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_completed_at ON tasks(completed_at);
+`,
+  },
 ];
 
 export interface MetaRecord {
@@ -163,4 +183,18 @@ export interface EpisodeRecord {
   id: string;
   content: string;
   created_at: string;
+}
+
+export type TaskStatus = "queued" | "running" | "done" | "failed";
+
+export interface TaskRecord {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  result: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  agent_id: string | null;
+  error: string | null;
 }

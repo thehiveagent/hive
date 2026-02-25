@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createConnection } from "node:net";
 import process from "node:process";
 
 import Database from "better-sqlite3";
@@ -11,6 +12,7 @@ import keytar from "keytar";
 import { normalizeProviderName, type ProviderName } from "../../providers/base.js";
 import {
   closeHiveDatabase,
+  countTasksByStatus,
   getHiveDatabasePath,
   getHiveHomeDir,
   getMetaValue,
@@ -29,6 +31,7 @@ import { renderError, renderHiveHeader, renderInfo, renderSuccess } from "../ui.
 const KEYCHAIN_SERVICE = "hive";
 const PROMPTS_DIRECTORY = "prompts";
 const CTX_DIRECTORY = "ctx";
+const DEFAULT_DAEMON_PORT = 2718;
 const PROVIDER_PING_TIMEOUT_MS = 5_000;
 const OLLAMA_PING_TIMEOUT_MS = 5_000;
 const DB_SIZE_WARNING_BYTES = 100 * 1024 * 1024;
@@ -165,6 +168,21 @@ export async function runDoctorCommand(options: DoctorOptions = {}): Promise<voi
     renderWarning("hive-ctx", hiveCtxCheck.message, counters);
   } else {
     renderFailure("hive-ctx", hiveCtxCheck.message, counters);
+  }
+
+  if (db) {
+    const taskCounts = countTasksByStatus(db);
+    const daemonStatus = await probeDaemonStatus();
+    const summary = `${taskCounts.queued} queued · ${taskCounts.running} running · ${taskCounts.done} done`;
+    if (taskCounts.queued + taskCounts.running > 0 && !daemonStatus) {
+      renderFailure("Task worker", `${summary} · daemon unreachable`, counters);
+    } else if (daemonStatus) {
+      renderSuccess(formatCheckLine("Task worker", `${summary} · running`));
+    } else {
+      renderSuccess(formatCheckLine("Task worker", `${summary} · idle`));
+    }
+  } else {
+    renderFailure("Task worker", "not checked (database unavailable)", counters);
   }
 
   if (db) {
@@ -468,6 +486,60 @@ async function checkHiveCtxStorage(ctxPath: string): Promise<{
   }
 
   return { ok: true, message: "storage ready" };
+}
+
+async function probeDaemonStatus(): Promise<Record<string, unknown> | null> {
+  const hiveHome = getHiveHomeDir();
+  const portFile = join(hiveHome, "daemon.port");
+  const port = readPortFile(portFile) ?? DEFAULT_DAEMON_PORT;
+
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port }, () => {
+      socket.write(JSON.stringify({ type: "status" }) + "\n");
+    });
+
+    let buffer = "";
+    let responded = false;
+
+    socket.on("data", (data: Buffer) => {
+      if (responded) {
+        return;
+      }
+      buffer += data.toString();
+      try {
+        const response = JSON.parse(buffer) as Record<string, unknown>;
+        responded = true;
+        socket.end();
+        resolve(response);
+      } catch {
+        // wait for more data
+      }
+    });
+
+    socket.on("error", () => {
+      if (!responded) {
+        socket.destroy();
+        resolve(null);
+      }
+    });
+
+    socket.setTimeout(500, () => {
+      if (!responded) {
+        socket.destroy();
+        resolve(null);
+      }
+    });
+  });
+}
+
+function readPortFile(portFile: string): number | null {
+  try {
+    const raw = fs.readFileSync(portFile, "utf8").trim();
+    const port = Number.parseInt(raw, 10);
+    return Number.isFinite(port) ? port : null;
+  } catch {
+    return null;
+  }
 }
 
 function checkNodeVersion(version: string): { ok: boolean; message: string } {
