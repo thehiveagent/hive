@@ -1,8 +1,11 @@
+import chalk from "chalk";
+
 import {
   completeOpenAICompatibleChat,
   type CompleteChatRequest,
   type CompleteChatResponse,
   ProviderConfigurationError,
+  ProviderRequestError,
   type Provider,
   type ProviderName,
   type StreamChatRequest,
@@ -65,6 +68,22 @@ export class OpenAICompatibleProvider implements Provider {
       throw new ProviderConfigurationError(`Provider "${this.name}" is missing an API key.`);
     }
 
+    try {
+      return await this.completeChatInternal(request, { includeTools: this.supportsTools });
+    } catch (error) {
+      if (this.shouldRetryWithoutTools(error, request)) {
+        process.stderr.write(chalk.dim("· tool call failed — retrying without tools") + "\n");
+        return await this.completeChatInternal(request, { includeTools: false });
+      }
+
+      throw error;
+    }
+  }
+
+  private completeChatInternal(
+    request: CompleteChatRequest,
+    options: { includeTools: boolean },
+  ): Promise<CompleteChatResponse> {
     return completeOpenAICompatibleChat({
       provider: this.name,
       baseUrl: this.baseUrl,
@@ -73,9 +92,31 @@ export class OpenAICompatibleProvider implements Provider {
       messages: request.messages,
       temperature: request.temperature,
       maxTokens: request.maxTokens,
-      tools: this.supportsTools ? request.tools : undefined,
+      tools: options.includeTools ? request.tools : undefined,
       extraHeaders: this.extraHeaders,
       extraBody: this.extraBody,
     });
+  }
+
+  private shouldRetryWithoutTools(error: unknown, request: CompleteChatRequest): boolean {
+    if (this.name !== "groq") {
+      return false;
+    }
+
+    if (!this.supportsTools || !request.tools || request.tools.length === 0) {
+      return false;
+    }
+
+    if (!(error instanceof ProviderRequestError)) {
+      return false;
+    }
+
+    const message = error.message.toLowerCase();
+    const is400 =
+      message.includes("http 400") ||
+      message.includes("status 400") ||
+      message.includes(" 400 ");
+
+    return is400 && message.includes("tool_use_failed");
   }
 }

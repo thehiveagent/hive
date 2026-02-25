@@ -11,7 +11,7 @@ export class GroqProvider extends OpenAICompatibleProvider {
       baseUrl: process.env.GROQ_BASE_URL ?? DEFAULT_GROQ_BASE_URL,
       apiKey,
       defaultModel: process.env.GROQ_MODEL ?? DEFAULT_GROQ_MODEL,
-      supportsTools: false,
+      supportsTools: true,
     });
   }
 }

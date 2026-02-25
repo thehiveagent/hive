@@ -283,13 +283,20 @@ export class HiveAgent {
       ...message,
     }));
 
+    // If the prompt already contains injected browse/search results (untrusted context block),
+    // do not enable model tool calling for this turn. This avoids unnecessary tool calls and
+    // provider 400s while still letting the model answer from the provided context.
+    const latestUserMessage = findLatestUserMessage(messages);
+    const toolsEnabledForTurn =
+      this.provider.supportsTools && !latestUserMessage.includes(UNTRUSTED_CONTEXT_START);
+
     for (let round = 0; round < MAX_TOOL_CALL_ROUNDS; round += 1) {
       const requestPayload = {
         model: providerRequest.model,
         temperature: providerRequest.temperature,
         maxTokens: providerRequest.maxTokens,
         messages,
-        ...(this.provider.supportsTools ? { tools: [WEB_SEARCH_TOOL] } : {}),
+        ...(toolsEnabledForTurn ? { tools: [WEB_SEARCH_TOOL] } : {}),
       } as CompleteChatRequest;
 
       const completion = await callWithTransientRetry(() =>
