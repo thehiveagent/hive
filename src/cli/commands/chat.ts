@@ -1690,6 +1690,7 @@ async function promptLine(question: string): Promise<string> {
     input: stdin,
     output: stdout,
     terminal: true,
+    crlfDelay: Infinity,
   });
 
   try {
@@ -1806,6 +1807,7 @@ async function readPromptWithSuggestions(): Promise<string> {
       input: stdin,
       output: stdout,
       terminal: true,
+      crlfDelay: Infinity,
     });
 
     try {
@@ -1828,6 +1830,23 @@ async function readPromptWithSuggestions(): Promise<string> {
     let selectedSuggestionIndex = 0;
     let suggestionWindowStart = 0;
     let renderedSuggestionRows = 0;
+
+    const getColumns = () => {
+      const columns = stdout.columns;
+      return typeof columns === "number" && Number.isFinite(columns) && columns >= 20 ? columns : 80;
+    };
+
+    const getVisibleBuffer = () => {
+      const columns = getColumns();
+      const prefixWidth = USER_PROMPT.length;
+      const available = Math.max(1, columns - prefixWidth);
+      const chars = Array.from(buffer);
+      if (chars.length <= available) {
+        return { text: buffer, width: chars.length };
+      }
+      const visibleChars = chars.slice(chars.length - available);
+      return { text: visibleChars.join(""), width: visibleChars.length };
+    };
 
     const cleanup = () => {
       stdin.off("keypress", onKeypress);
@@ -1855,22 +1874,22 @@ async function readPromptWithSuggestions(): Promise<string> {
         value = "/help";
       }
 
+      // Clear suggestion rows first while the prompt line is guaranteed to be single-row.
       readline.cursorTo(stdout, 0);
       readline.clearLine(stdout, 0);
-      stdout.write(`${promptPrefix}${buffer}`);
-
       for (let index = 0; index < renderedSuggestionRows; index += 1) {
         readline.moveCursor(stdout, 0, 1);
         readline.cursorTo(stdout, 0);
         readline.clearLine(stdout, 0);
       }
-
       for (let index = 0; index < renderedSuggestionRows; index += 1) {
         readline.moveCursor(stdout, 0, -1);
       }
-
       renderedSuggestionRows = 0;
-      readline.cursorTo(stdout, USER_PROMPT.length + buffer.length);
+
+      readline.cursorTo(stdout, 0);
+      readline.clearLine(stdout, 0);
+      stdout.write(`${promptPrefix}${buffer}`);
       stdout.write("\n");
       cleanup();
       resolve(value);
@@ -1901,9 +1920,12 @@ async function readPromptWithSuggestions(): Promise<string> {
         suggestionWindowStart + visibleSuggestionCount,
       );
 
+      const visible = getVisibleBuffer();
+
       readline.cursorTo(stdout, 0);
       readline.clearLine(stdout, 0);
-      stdout.write(`${promptPrefix}${buffer}`);
+      // Keep the input on a single terminal row by horizontally scrolling the buffer.
+      stdout.write(`${promptPrefix}${visible.text}`);
 
       const rowsToRender = Math.max(renderedSuggestionRows, visibleSuggestions.length);
       for (let index = 0; index < rowsToRender; index += 1) {
@@ -1932,7 +1954,7 @@ async function readPromptWithSuggestions(): Promise<string> {
         readline.moveCursor(stdout, 0, -1);
       }
 
-      readline.cursorTo(stdout, USER_PROMPT.length + buffer.length);
+      readline.cursorTo(stdout, USER_PROMPT.length + visible.width);
       renderedSuggestionRows = visibleSuggestions.length;
     };
 

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { exec } from "node:child_process";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { getHiveHomeDir } from "../../storage/db.js";
 import { renderInfo, renderSuccess, renderError } from "../ui.js";
 
@@ -19,10 +19,12 @@ const SERVICE_FILE_LINUX = path.join(SERVICE_DIR_LINUX, SERVICE_NAME_LINUX);
  * Get the installation path for the daemon
  */
 function getInstallationPath(): string {
-  // Try to resolve from current module path
-  const modulePath = import.meta.url.replace("file://", "");
-  const distPath = path.join(path.dirname(path.dirname(modulePath)), "daemon");
-  return distPath;
+  // Resolve relative to compiled CLI location:
+  // dist/cli/commands/daemon-service.js -> package root -> dist/daemon
+  const thisFile = fileURLToPath(import.meta.url);
+  const thisDir = path.dirname(thisFile);
+  const packageRoot = path.resolve(thisDir, "..", "..", "..");
+  return path.join(packageRoot, "dist", "daemon");
 }
 
 /**
@@ -32,6 +34,27 @@ function getWatcherPath(): string {
   const installationPath = getInstallationPath();
   const watcherPath = path.join(installationPath, "watcher.js");
   return watcherPath;
+}
+
+export async function startService(): Promise<void> {
+  const platform = process.platform;
+
+  switch (platform) {
+    case "darwin": {
+      await execAsync("launchctl start net.thehiveagent.hive-watcher");
+      return;
+    }
+    case "linux": {
+      await execAsync("systemctl --user start hive-watcher");
+      return;
+    }
+    case "win32": {
+      await execAsync('schtasks /run /tn "HiveWatcher"');
+      return;
+    }
+    default:
+      throw new Error(`Unsupported platform: ${platform}`);
+  }
 }
 
 /**
@@ -142,6 +165,13 @@ export async function installService(): Promise<void> {
         // Already loaded or permission issue
       }
 
+      // Explicitly start right away (don't wait for reboot/login)
+      try {
+        await startService();
+      } catch {
+        // Best-effort
+      }
+
       renderSuccess(`Service installed: ${SERVICE_FILE_MAC}`);
       break;
     }
@@ -156,8 +186,9 @@ export async function installService(): Promise<void> {
       fs.writeFileSync(SERVICE_FILE_LINUX, serviceContent);
 
       try {
-        await execAsync("systemctl --user enable hive-watcher.service");
-        await execAsync("systemctl --user start hive-watcher.service");
+        await execAsync("systemctl --user daemon-reload");
+        await execAsync("systemctl --user enable hive-watcher");
+        await startService();
       } catch (error) {
         renderInfo("Note: systemctl may require passwordless sudo for user services");
         throw error;
@@ -175,6 +206,12 @@ export async function installService(): Promise<void> {
       const createTaskCmd = `schtasks /create /tn "HiveWatcher" /tr "node \\"${watcherPath}\\"" /sc onlogon /ru "${username}" /f`;
       try {
         await execAsync(createTaskCmd);
+        // Explicitly start right away
+        try {
+          await startService();
+        } catch {
+          // Best-effort
+        }
         renderSuccess("Windows Task Scheduler task created");
       } catch (error) {
         renderError("Failed to create Windows Task Scheduler task");
@@ -214,8 +251,8 @@ export async function uninstallService(): Promise<void> {
     case "linux": {
       // Linux
       try {
-        await execAsync("systemctl --user stop hive-watcher.service");
-        await execAsync("systemctl --user disable hive-watcher.service");
+        await execAsync("systemctl --user stop hive-watcher");
+        await execAsync("systemctl --user disable hive-watcher");
       } catch {
         // Already stopped or not found
       }

@@ -14,6 +14,7 @@ import "dotenv/config";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { getHiveHomeDir } from "../storage/db.js";
 
 const HIVE_HOME = getHiveHomeDir();
@@ -146,12 +147,9 @@ function spawnDaemon(): Promise<void> {
   return new Promise((resolve, reject) => {
     logToDaemonFile("Spawning new daemon process...");
 
-    const daemonScript = path.join(
-      import.meta.dirname || import.meta.url,
-      "..",
-      "daemon",
-      "index.js",
-    );
+    const watcherFile = fileURLToPath(import.meta.url);
+    const watcherDir = path.dirname(watcherFile);
+    const daemonScript = path.join(watcherDir, "index.js");
 
     daemonProcess = spawn(process.execPath, [daemonScript], {
       detached: true,

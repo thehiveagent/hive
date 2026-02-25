@@ -30,6 +30,7 @@ import {
   type HiveDatabase,
 } from "../storage/db.js";
 import { HiveAgent } from "../agent/agent.js";
+import type { Provider } from "../providers/base.js";
 import { createProvider } from "../providers/index.js";
 import { initializeHiveCtxSession, type HiveCtxSession } from "../agent/hive-ctx.js";
 
@@ -52,6 +53,8 @@ let startTime: number;
 let db: HiveDatabase | null = null;
 let agent: ReturnType<typeof getPrimaryAgent> | null = null;
 let ctxSession: HiveCtxSession | null = null;
+let provider: Provider | null = null;
+let hiveAgent: HiveAgent | null = null;
 let tcpServer: Server | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
 let taskPollInterval: NodeJS.Timeout | null = null;
@@ -183,6 +186,16 @@ async function initializeDaemon(): Promise<void> {
 
   // Initialize provider
   if (agent) {
+    try {
+      logToDaemonFile(`Initializing provider (${agent.provider})...`);
+      provider = await createProvider(agent.provider);
+      hiveAgent = db ? new HiveAgent(db, provider, agent) : null;
+    } catch (error) {
+      provider = null;
+      hiveAgent = null;
+      logToDaemonFile(`Warning: Failed to initialize provider: ${String(error)}`);
+    }
+
     try {
       logToDaemonFile("Initializing hive-ctx...");
       const result = await initializeHiveCtxSession({
@@ -386,6 +399,7 @@ function handleTask(
   try {
     insertTask(db, { id, title, agentId: parsed.payload?.agent_id ?? agent?.id ?? null });
     sendResponse(socket, { accepted: true, id });
+    logToDaemonFile(`worker: queued task ${id}`);
     void tickTaskWorker();
   } catch (error) {
     sendResponse(socket, { accepted: false, error: String(error) });
@@ -540,6 +554,7 @@ main().catch((error) => {
 });
 
 function startTaskWorker(): void {
+  logToDaemonFile(`worker: started (poll ${TASK_POLL_INTERVAL_MS}ms)`);
   taskPollInterval = setInterval(() => {
     void tickTaskWorker().catch((error) => {
       logToDaemonFile(`Task worker error: ${String(error)}`);
@@ -553,21 +568,36 @@ function startTaskWorker(): void {
 }
 
 async function tickTaskWorker(): Promise<void> {
-  if (!db || !agent) {
+  logToDaemonFile("worker: checking for queued tasks");
+
+  if (!db) {
+    logToDaemonFile("worker: database unavailable");
+    return;
+  }
+
+  if (!agent) {
+    logToDaemonFile("worker: no agent profile (run `hive init`), skipping");
     return;
   }
 
   if (activeTaskId) {
+    logToDaemonFile(`worker: busy (active ${activeTaskId}), skipping`);
     return;
   }
 
+  let pickedAny = false;
   while (true) {
     const next = claimNextQueuedTask(db);
     if (!next) {
+      if (!pickedAny) {
+        logToDaemonFile("worker: no queued tasks");
+      }
       return;
     }
 
+    pickedAny = true;
     activeTaskId = next.id;
+    logToDaemonFile(`worker: picked up task ${next.id}`);
     try {
       await runTask(next);
     } finally {
@@ -582,16 +612,22 @@ async function runTask(task: TaskRecord): Promise<void> {
   }
 
   if (cancelledTaskIds.has(task.id)) {
+    logToDaemonFile(`worker: task ${task.id} cancelled before start`);
     markTaskFailed(db, task.id, "cancelled");
     cancelledTaskIds.delete(task.id);
     return;
   }
 
   markTaskRunning(db, task.id);
+  logToDaemonFile(`worker: started task ${task.id}`);
 
   try {
-    const provider = await createProvider(agent.provider);
-    const hiveAgent = new HiveAgent(db, provider, agent);
+    if (!hiveAgent) {
+      // Recover if provider init failed on boot (e.g. missing key at the time).
+      logToDaemonFile(`worker: initializing provider on-demand (${agent.provider})`);
+      provider = await createProvider(agent.provider);
+      hiveAgent = new HiveAgent(db, provider, agent);
+    }
 
     const context = ctxSession ? await ctxSession.build(task.title) : null;
     let assistantText = "";
@@ -614,9 +650,11 @@ async function runTask(task: TaskRecord): Promise<void> {
     }
 
     markTaskDone(db, task.id, assistantText);
+    logToDaemonFile(`worker: completed task ${task.id}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     markTaskFailed(db, task.id, message);
+    logToDaemonFile(`worker: failed task ${task.id}: ${message}`);
   } finally {
     cancelledTaskIds.delete(task.id);
   }

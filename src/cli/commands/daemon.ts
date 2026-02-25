@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createConnection } from "node:net";
-import { exec } from "node:child_process";
-import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
 import { Command } from "commander";
 import chalk from "chalk";
@@ -13,16 +13,8 @@ import {
   getPrimaryAgent,
   openHiveDatabase,
   closeHiveDatabase,
-  setMetaValue,
 } from "../../storage/db.js";
-import {
-  renderHiveHeader,
-  renderInfo,
-  renderSeparator,
-  renderStep,
-  renderSuccess,
-  renderError,
-} from "../ui.js";
+import { renderHiveHeader, renderInfo, renderError } from "../ui.js";
 
 const HIVE_HOME = getHiveHomeDir();
 const DAEMON_PID_FILE = path.join(HIVE_HOME, "daemon.pid");
@@ -31,25 +23,17 @@ const DAEMON_LOCK_FILE = path.join(HIVE_HOME, "daemon.lock");
 const DAEMON_LOG_FILE = path.join(HIVE_HOME, "daemon.log");
 const DAEMON_WATCHER_PID_FILE = path.join(HIVE_HOME, "daemon.watcher.pid");
 const DAEMON_STOP_SENTINEL = path.join(HIVE_HOME, "daemon.stop");
-const DAEMON_SERVICE_FILE_MAC = path.join(
-  homedir(),
-  "Library",
-  "LaunchAgents",
-  "net.thehiveagent.hive-watcher.plist",
-);
-const DAEMON_SERVICE_FILE_LINUX = path.join(
-  homedir(),
-  ".config",
-  "systemd",
-  "user",
-  "hive-watcher.service",
-);
 
 const DEFAULT_PORT = 2718;
 const TCP_TIMEOUT_MS = 3000;
 
 // Import helper functions from other modules
-import { installService, uninstallService, getServiceStatus } from "./daemon-service.js";
+import {
+  installService,
+  uninstallService,
+  getServiceStatus,
+  startService,
+} from "./daemon-service.js";
 
 export function registerDaemonCommand(program: Command): void {
   const daemonCmd = program.command("daemon").description("Manage the Hive background daemon");
@@ -155,21 +139,14 @@ function getDaemonPort(): number {
 }
 
 /**
- * Check if daemon is running
+ * Check if a process is alive
  */
-function isDaemonRunning(): { running: boolean; pid?: number; port?: number } {
-  const pid = getDaemonPid();
-
-  if (!pid) {
-    return { running: false };
-  }
-
+function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    const port = getDaemonPort();
-    return { running: true, pid, port };
+    return true;
   } catch {
-    return { running: false };
+    return false;
   }
 }
 
@@ -205,12 +182,77 @@ function getDaemonPid(): number | null {
   }
 }
 
+function removeDaemonPidFile(): void {
+  try {
+    fs.unlinkSync(DAEMON_PID_FILE);
+  } catch {
+    // Ignore
+  }
+}
+
+function ensureHiveHomeExists(): void {
+  try {
+    fs.mkdirSync(HIVE_HOME, { recursive: true });
+  } catch {
+    // Ignore
+  }
+}
+
+function writeDaemonPidFile(pid: number): void {
+  ensureHiveHomeExists();
+  fs.writeFileSync(DAEMON_PID_FILE, String(pid));
+}
+
+function canConnectTcp(port: number, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+
+    const done = (ok: boolean) => {
+      try {
+        socket.destroy();
+      } catch {
+        // Ignore
+      }
+      resolve(ok);
+    };
+
+    socket.on("connect", () => done(true));
+    socket.on("error", () => done(false));
+    socket.setTimeout(timeoutMs, () => done(false));
+  });
+}
+
+async function waitForTcpReady(
+  port: number,
+  timeoutMs: number,
+  pollMs: number,
+): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start <= timeoutMs) {
+    // eslint-disable-next-line no-await-in-loop
+    const ok = await canConnectTcp(port, Math.min(250, pollMs));
+    if (ok) return true;
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  return false;
+}
+
+function getPackageRootDir(): string {
+  const thisFile = fileURLToPath(import.meta.url);
+  const thisDir = path.dirname(thisFile);
+  // dist/cli/commands/daemon.js -> package root
+  return path.resolve(thisDir, "..", "..", "..");
+}
+
 export async function runDaemonStartCommand(options: { force?: boolean } = {}): Promise<void> {
   renderHiveHeader("Daemon Start");
 
   const spinner = ora("Starting Hive daemon...").start();
 
   try {
+    ensureHiveHomeExists();
+
     // Install service if needed
     const status = await getServiceStatus();
     if (!status.installed || options.force) {
@@ -221,50 +263,53 @@ export async function runDaemonStartCommand(options: { force?: boolean } = {}): 
       spinner.info("Service already installed");
     }
 
-    // Start watcher (which will start daemon)
-    spinner.text = "Starting watcher process...";
-    const { spawn } = await import("node:child_process");
-    const daemonScript = path.join(
-      path.dirname(import.meta.dirname || import.meta.url),
-      "dist",
-      "daemon",
-      "watcher.js",
-    );
+    // Explicitly start the registered service right away (don't wait for reboot/login)
+    spinner.text = "Starting service...";
+    try {
+      await startService();
+    } catch {
+      // Best-effort: fallback spawn below
+    }
 
-    const watcher = spawn(process.execPath, [daemonScript], {
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        HIVE_HOME,
-      },
-    });
+    const port = getDaemonPort();
 
-    watcher.unref();
+    // If daemon is already reachable, we're done.
+    const alreadyUp = await canConnectTcp(port, 250);
 
-    // Give watcher time to start
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    let startedPid: number | null = null;
+    if (!alreadyUp) {
+      spinner.text = "Starting daemon process (fallback)...";
 
-    // Wait for daemon to be ready
-    let attempts = 0;
-    const maxAttempts = 30; // 30 seconds max
+      const packageRoot = getPackageRootDir();
+      const child = spawn("node", ["dist/daemon/index.js"], {
+        cwd: packageRoot,
+        detached: true,
+        stdio: "ignore",
+        env: { ...process.env, HIVE_HOME },
+        windowsHide: true,
+      });
 
-    while (attempts < maxAttempts) {
-      const status = isDaemonRunning();
-      if (status.running) {
-        break;
+      child.unref();
+
+      if (typeof child.pid === "number") {
+        startedPid = child.pid;
+        writeDaemonPidFile(child.pid);
       }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      attempts++;
     }
 
-    if (attempts < maxAttempts) {
-      spinner.succeed(`Daemon running on port ${getDaemonPort()}`);
+    spinner.text = `Waiting for daemon TCP on 127.0.0.1:${port}...`;
+    const ready = await waitForTcpReady(port, 5000, 500);
+
+    spinner.stop();
+
+    if (ready) {
+      const pidFromFile = getDaemonPid();
+      const pid = pidFromFile && isProcessAlive(pidFromFile) ? pidFromFile : startedPid;
+      console.log(chalk.green(`✓ Daemon running · PID ${pid ?? "unknown"}`));
     } else {
-      spinner.warn("Watcher started but daemon not responding yet");
+      console.log(chalk.red("✗ Daemon failed to start — check ~/.hive/daemon.log."));
     }
 
-    // Show status
     await runDaemonStatusCommand();
   } catch (error) {
     spinner.fail("Failed to start daemon");
@@ -279,7 +324,8 @@ export async function runDaemonStopCommand(): Promise<void> {
   const spinner = ora("Stopping Hive daemon...").start();
 
   try {
-    const status = isDaemonRunning();
+    const pid = getDaemonPid();
+    const status = pid && isProcessAlive(pid) ? { running: true, pid } : { running: false as const };
 
     if (!status.running) {
       spinner.info("Daemon is not running");
@@ -303,7 +349,8 @@ export async function runDaemonStopCommand(): Promise<void> {
       const maxWait = 10000; // 10 seconds
 
       while (waitTime < maxWait) {
-        if (!isDaemonRunning().running) {
+        const pidNow = getDaemonPid();
+        if (!pidNow || !isProcessAlive(pidNow)) {
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -311,7 +358,8 @@ export async function runDaemonStopCommand(): Promise<void> {
       }
 
       // Force kill if still running
-      if (isDaemonRunning().running) {
+      const pidNow = getDaemonPid();
+      if (pidNow && isProcessAlive(pidNow)) {
         try {
           process.kill(status.pid!, "SIGKILL");
         } catch {
@@ -347,7 +395,8 @@ export async function runDaemonRestartCommand(): Promise<void> {
 
   try {
     // Stop first (with sentinel to prevent auto-restart)
-    const status = isDaemonRunning();
+    const pid = getDaemonPid();
+    const status = pid && isProcessAlive(pid) ? { running: true, pid } : { running: false as const };
     if (status.running) {
       fs.writeFileSync(DAEMON_STOP_SENTINEL, String(Date.now()));
     }
@@ -384,7 +433,20 @@ export async function runDaemonRestartCommand(): Promise<void> {
 export async function runDaemonStatusCommand(): Promise<void> {
   renderHiveHeader("Daemon Status");
 
-  const daemonStatus = isDaemonRunning();
+  const pidFromFile = getDaemonPid();
+  const pidAlive = pidFromFile ? isProcessAlive(pidFromFile) : false;
+  if (pidFromFile && !pidAlive) {
+    removeDaemonPidFile();
+  }
+
+  const port = getDaemonPort();
+  const tcpOk = pidAlive ? await canConnectTcp(port, 250) : false;
+  const daemonStatus = {
+    pid: pidAlive ? pidFromFile ?? undefined : undefined,
+    pidAlive,
+    tcpOk,
+    running: pidAlive && tcpOk,
+  };
   const watcherStatus = isWatcherRunning();
 
   // Get agent info from database
@@ -424,7 +486,7 @@ export async function runDaemonStatusCommand(): Promise<void> {
   let daemonStatusFromDaemon: any = null;
   if (daemonStatus.running) {
     try {
-      daemonStatusFromDaemon = await sendDaemonCommand({ type: "status" }, getDaemonPort());
+      daemonStatusFromDaemon = await sendDaemonCommand({ type: "status" }, port);
     } catch {
       // Ignore
     }
@@ -433,9 +495,15 @@ export async function runDaemonStatusCommand(): Promise<void> {
   // Daemon status line
   let statusColor: typeof chalk = chalk.green;
   let statusText = "running";
-  if (!daemonStatus.running) {
+  if (!pidFromFile) {
     statusColor = chalk.red;
     statusText = "stopped";
+  } else if (!pidAlive) {
+    statusColor = chalk.red;
+    statusText = "stopped";
+  } else if (!tcpOk) {
+    statusColor = chalk.yellow;
+    statusText = "unresponsive";
   }
 
   // Heartbeat age
@@ -473,7 +541,7 @@ export async function runDaemonStatusCommand(): Promise<void> {
   }
 
   // Port
-  const port = daemonStatusFromDaemon?.port || getDaemonPort();
+  const displayPort = daemonStatusFromDaemon?.port || port;
 
   // Uptime
   let uptime = "n/a";
@@ -496,7 +564,7 @@ export async function runDaemonStatusCommand(): Promise<void> {
   console.log(
     `  ${chalk.dim("· Memory     ")} ${memoryStats ? `${memoryStats.episodes} episodes · ${memoryStats.conversations} conversations` : chalk.dim("n/a")}`,
   );
-  console.log(`  ${chalk.dim("· Port       ")} ${chalk.white(`127.0.0.1:${port}`)}`);
+  console.log(`  ${chalk.dim("· Port       ")} ${chalk.white(`127.0.0.1:${displayPort}`)}`);
   console.log(`  ${chalk.dim("· Log        ")} ${chalk.dim(`${DAEMON_LOG_FILE} (${logSize})`)}`);
   console.log("");
 }
