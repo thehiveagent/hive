@@ -120,10 +120,12 @@ const COMMAND_HELP_TEXT = [
   "  /export          export conversation markdown",
   "  /save <title>    name this conversation",
   "  /history         list recent conversations",
-  "  /clear           clear the screen",
+  "  /clear           clear screen",
   "  /think <question>think step by step",
   "  /retry           resend last message",
   "  /copy            copy last reply",
+  "  /terminal <cmd>  execute terminal command",
+  "  /files <op>      filesystem operations (read/write/list/create/delete/move)",
   "  /hive memory list  show knowledge items",
   "  /hive memory auto  show auto-extracted facts",
   "  /hive memory clear clear episodic memory",
@@ -287,6 +289,16 @@ const COMMAND_SUGGESTIONS: CommandSuggestion[] = [
     label: "/copy",
     insertText: "/copy",
     description: "copy last reply",
+  },
+  {
+    label: "/terminal <cmd>",
+    insertText: "/terminal ",
+    description: "execute terminal command",
+  },
+  {
+    label: "/files <op>",
+    insertText: "/files ",
+    description: "filesystem operations",
   },
   {
     label: "/browse <url>",
@@ -1646,6 +1658,125 @@ async function handleChatSlashCommand(input: {
       `conversation=${input.conversationId ?? "none"}`,
     ].join(" · ");
     renderInfo(info);
+    return true;
+  }
+
+  if (lower === "/retry") {
+    const userPrompt = input.lastUserPromptRef.value;
+    if (!userPrompt) {
+      renderError("Nothing to retry yet.");
+      return true;
+    }
+  }
+
+  if (lower.startsWith("/terminal ")) {
+    const command = normalized.slice("/terminal".length).trim();
+    if (!command) {
+      renderError("Usage: /terminal <command>");
+      return true;
+    }
+
+    try {
+      const { terminalTool } = await import("../../tools/terminal.js");
+      const result = await terminalTool.runCommand(command);
+      renderInfo(`Command: ${command}`);
+      if (result.stdout) {
+        console.log(result.stdout);
+      }
+      if (result.stderr) {
+        console.error(chalk.red(result.stderr));
+      }
+      renderInfo(`Exit code: ${result.exitCode}`);
+    } catch (error) {
+      renderError(`Terminal error: ${formatError(error)}`);
+    }
+    input.lastUserPromptRef.value = null;
+    return true;
+  }
+
+  if (lower.startsWith("/files ")) {
+    const args = normalized.slice("/files".length).trim();
+    if (!args) {
+      renderError("Usage: /files <operation> [args]");
+      renderInfo("Operations: read <path>, write <path> <content>, list <path>, create <path>, delete <path>, move <src> <dest>");
+      return true;
+    }
+
+    try {
+      const { filesystemTool } = await import("../../tools/filesystem.js");
+      const parts = args.split(' ');
+      const operation = parts[0];
+      
+      switch (operation) {
+        case "read": {
+          if (parts.length < 2) {
+            renderError("Usage: /files read <path>");
+            return true;
+          }
+          const content = await filesystemTool.readFile(parts[1]);
+          console.log(content);
+          break;
+        }
+        
+        case "write": {
+          if (parts.length < 3) {
+            renderError("Usage: /files write <path> <content>");
+            return true;
+          }
+          await filesystemTool.writeFile(parts[1], parts.slice(2).join(' '));
+          renderSuccess(`✓ Wrote to ${parts[1]}`);
+          break;
+        }
+        
+        case "list": {
+          if (parts.length < 2) {
+            renderError("Usage: /files list <path>");
+            return true;
+          }
+          const entries = await filesystemTool.listDir(parts[1]);
+          entries.forEach(entry => console.log(entry));
+          break;
+        }
+        
+        case "create": {
+          if (parts.length < 2) {
+            renderError("Usage: /files create <path>");
+            return true;
+          }
+          await filesystemTool.createDir(parts[1]);
+          renderSuccess(`✓ Created directory ${parts[1]}`);
+          break;
+        }
+        
+        case "delete": {
+          if (parts.length < 2) {
+            renderError("Usage: /files delete <path>");
+            renderInfo("Note: Delete operations require confirmation in tool usage");
+            return true;
+          }
+          await filesystemTool.deleteFile(parts[1], true);
+          renderSuccess(`✓ Deleted ${parts[1]}`);
+          break;
+        }
+        
+        case "move": {
+          if (parts.length < 3) {
+            renderError("Usage: /files move <src> <dest>");
+            return true;
+          }
+          await filesystemTool.moveFile(parts[1], parts[2]);
+          renderSuccess(`✓ Moved ${parts[1]} to ${parts[2]}`);
+          break;
+        }
+        default:
+          renderError(`Unknown operation: ${operation}`);
+          renderInfo("Operations: read, write, list, create, delete, move");
+          return true;
+      }
+    } catch (error) {
+      renderError(`Filesystem error: ${formatError(error)}`);
+    }
+    input.lastUserPromptRef.value = null;
     return true;
   }
 
