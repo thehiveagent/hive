@@ -343,7 +343,8 @@ async function runDiscordSetup(): Promise<void> {
 
   const spinner = ora("Registering Discord slash commands...").start();
   try {
-    const discord = await import("discord.js");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const discord = (await import("discord.js")) as any;
     const { Client, GatewayIntentBits, REST, Routes } = discord;
 
     const client = new Client({ intents: [GatewayIntentBits.Guilds] });

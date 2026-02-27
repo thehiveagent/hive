@@ -1,11 +1,11 @@
 /**
  * chatBox.ts — scrollable message history panel.
  *
- * Uses blessed's `log` widget which auto-scrolls on append.
- * Sits between the status bar (top: 1) and input box (bottom: 3).
+ * Transparent background, sits between status bar and input box.
  */
 import { createRequire } from "node:module";
 import type * as Blessed from "blessed";
+import type { TUIColors } from "./themeColors.js";
 
 const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -13,6 +13,9 @@ const blessed = require("blessed") as typeof Blessed;
 
 export interface ChatBoxOptions {
     screen: Blessed.Widgets.Screen;
+    colors: TUIColors;
+    /** Top row (after banner + status bar) */
+    top: number;
 }
 
 export class ChatBox {
@@ -20,26 +23,26 @@ export class ChatBox {
     private _spinnerLine = "";
     private _hasSpinner = false;
 
-    constructor({ screen }: ChatBoxOptions) {
+    constructor({ screen, colors, top }: ChatBoxOptions) {
         this.log = blessed.log({
             parent: screen,
-            top: 1,
+            top,
             left: 0,
             width: "100%",
-            bottom: 3,
+            bottom: 3, // leaves input box room
             tags: false,
             scrollable: true,
             alwaysScroll: true,
             scrollbar: {
                 ch: "│",
-                style: { fg: "grey" },
+                style: { fg: colors.borderDim },
             },
             mouse: true,
             keys: true,
             vi: true,
             style: {
                 fg: "white",
-                bg: "black",
+                // no bg — transparent
             },
             padding: { left: 1, right: 1 },
         });

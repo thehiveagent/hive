@@ -1,8 +1,15 @@
 /**
  * tui.ts — main blessed screen + layout.
  *
- * Orchestrates StatusBar, ChatBox, InputBox, and Spinner.
- * Exposes a clean API that chat.ts uses to drive the UI.
+ * Orchestrates BannerPanel, StatusBar, ChatBox, InputBox,
+ * CommandPicker, and Spinner.
+ *
+ * Layout (row 0..N from top):
+ *   [0..bannerH-1]   BannerPanel (ASCII art, responsive)
+ *   [bannerH]        StatusBar (1 row, dim info line)
+ *   [bannerH+1..-4]  ChatBox (scrollable)
+ *   [overlaid -5..-4]CommandPicker (floating, above input)
+ *   [-3..0]          InputBox (3 rows, always focused)
  */
 import { createRequire } from "node:module";
 import type * as Blessed from "blessed";
@@ -15,6 +22,9 @@ import { ChatBox } from "./chatBox.js";
 import { InputBox } from "./inputBox.js";
 import { Spinner } from "./spinner.js";
 import { StatusBar, type StatusBarState } from "./statusBar.js";
+import { BannerPanel } from "./bannerPanel.js";
+import { CommandPicker } from "./commandPicker.js";
+import { loadTUIColors, type TUIColors } from "./themeColors.js";
 
 export interface TUIOptions {
     agentName: string;
@@ -22,18 +32,24 @@ export interface TUIOptions {
     model: string;
     onInput: (text: string) => Promise<void>;
     onExit: () => void;
-    onTab?: (partial: string) => string | undefined;
 }
 
 export class TUI {
     private screen: Blessed.Widgets.Screen;
+    private bannerPanel: BannerPanel;
     private statusBar: StatusBar;
     private chatBox: ChatBox;
     private inputBox: InputBox;
+    private commandPicker: CommandPicker;
     private spinner: Spinner;
+    private colors: TUIColors;
     private _inputBusy = false;
 
     constructor(opts: TUIOptions) {
+        // Load theme colors once at startup
+        this.colors = loadTUIColors();
+        const colors = this.colors;
+
         this.screen = blessed.screen({
             smartCSR: true,
             title: `hive — ${opts.agentName}`,
@@ -41,23 +57,58 @@ export class TUI {
             forceUnicode: true,
         });
 
-        this.statusBar = new StatusBar({ screen: this.screen });
+        // ── Banner (top, fixed height, responsive) ─────────────────────────────
+        this.bannerPanel = new BannerPanel({ screen: this.screen, colors });
+        const bannerH = this.bannerPanel.height(this.screen.width as number);
+
+        // ── Status bar (row below banner) ─────────────────────────────────────
+        this.statusBar = new StatusBar({
+            screen: this.screen,
+            colors,
+            top: bannerH,
+        });
         this.statusBar.update({
             agentName: opts.agentName,
             provider: opts.provider,
             model: opts.model,
         });
 
-        this.chatBox = new ChatBox({ screen: this.screen });
+        // ── Chat box (from banner+statusBar to just above input) ──────────────
+        this.chatBox = new ChatBox({
+            screen: this.screen,
+            colors,
+            top: bannerH + 1,
+        });
+
+        // ── Spinner ───────────────────────────────────────────────────────────
         this.spinner = new Spinner();
 
+        // ── Command picker (floating, above input box) ────────────────────────
+        this.commandPicker = new CommandPicker({
+            screen: this.screen,
+            colors,
+            onSelect: (insertText: string) => {
+                this.inputBox.setValue(insertText);
+                // Re-filter with new value — if it ends with space, hide picker
+                this.commandPicker.update(insertText);
+            },
+            onDismiss: () => {
+                // nothing extra needed
+            },
+        });
+
+        // ── Input box (bottom, always focused) ────────────────────────────────
         this.inputBox = new InputBox({
             screen: this.screen,
+            colors,
             onSubmit: (value: string) => {
                 if (this._inputBusy) return;
                 this._inputBusy = true;
 
-                // Echo user message (dimmed) into chatBox
+                // Hide picker on submit
+                this.commandPicker.hide();
+
+                // Echo user message (dimmed)
                 this.chatBox.append(`\x1b[2m${value}\x1b[0m`);
                 this.chatBox.append("");
 
@@ -67,9 +118,16 @@ export class TUI {
                 });
             },
             onExit: opts.onExit,
-            onTab: opts.onTab,
+            onValueChange: (value: string) => {
+                // Update picker filter on every keystroke
+                this.commandPicker.update(value);
+            },
+            onKeyForPicker: (keyName: string) => {
+                return this.commandPicker.handleKey(keyName);
+            },
         });
 
+        // ── Resize ────────────────────────────────────────────────────────────
         this.screen.on("resize", () => {
             this.screen.render();
         });
@@ -126,5 +184,9 @@ export class TUI {
 
     render(): void {
         this.screen.render();
+    }
+
+    getColors(): TUIColors {
+        return this.colors;
     }
 }
