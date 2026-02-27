@@ -4,7 +4,12 @@
  * Orchestrates StatusBar, ChatBox, InputBox, and Spinner.
  * Exposes a clean API that chat.ts uses to drive the UI.
  */
-import * as blessed from "blessed";
+import { createRequire } from "node:module";
+import type * as Blessed from "blessed";
+
+const require = createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const blessed = require("blessed") as typeof Blessed;
 
 import { ChatBox } from "./chatBox.js";
 import { InputBox } from "./inputBox.js";
@@ -21,7 +26,7 @@ export interface TUIOptions {
 }
 
 export class TUI {
-    private screen: blessed.Widgets.Screen;
+    private screen: Blessed.Widgets.Screen;
     private statusBar: StatusBar;
     private chatBox: ChatBox;
     private inputBox: InputBox;
@@ -44,7 +49,6 @@ export class TUI {
         });
 
         this.chatBox = new ChatBox({ screen: this.screen });
-
         this.spinner = new Spinner();
 
         this.inputBox = new InputBox({
@@ -53,7 +57,7 @@ export class TUI {
                 if (this._inputBusy) return;
                 this._inputBusy = true;
 
-                // Echo user message to chatBox (dimmed)
+                // Echo user message (dimmed) into chatBox
                 this.chatBox.append(`\x1b[2m${value}\x1b[0m`);
                 this.chatBox.append("");
 
@@ -66,7 +70,6 @@ export class TUI {
             onTab: opts.onTab,
         });
 
-        // Resize handler — blessed handles most of it, just re-render
         this.screen.on("resize", () => {
             this.screen.render();
         });
@@ -74,54 +77,40 @@ export class TUI {
         this.screen.render();
     }
 
-    // ---------------------------------------------------------------------------
-    // Public API used by chat.ts
-    // ---------------------------------------------------------------------------
+    // ── Public API ────────────────────────────────────────────────────────────
 
-    /** Append a complete message/line to chatBox */
     appendMessage(text: string): void {
         this.chatBox.append(text);
     }
 
-    /** Append a streaming token (buffered by chatBox) */
     appendToken(token: string): void {
         this.chatBox.appendStreamToken(token);
     }
 
-    /** Flush remaining streaming buffer at end of response */
     flushStream(): void {
         this.chatBox.flushStream();
-        this.chatBox.append(""); // blank line after response
+        this.chatBox.append("");
     }
 
-    /** Show the thinking spinner inline in chatBox */
     showSpinner(): void {
         this.spinner.start(
-            (frame) => {
-                this.chatBox.showSpinnerFrame(frame);
-            },
-            () => {
-                this.chatBox.clearSpinner();
-            },
+            (frame) => { this.chatBox.showSpinnerFrame(frame); },
+            () => { this.chatBox.clearSpinner(); },
         );
     }
 
-    /** Hide the thinking spinner */
     hideSpinner(): void {
         this.spinner.stop();
     }
 
-    /** Update the status bar */
     updateStatus(state: Partial<StatusBarState>): void {
         this.statusBar.update(state);
     }
 
-    /** Clear chatBox only (for /clear command) */
     clearChat(): void {
         this.chatBox.clear();
     }
 
-    /** Destroy the blessed screen and restore terminal */
     destroy(): void {
         try {
             this.spinner.stop();
@@ -131,12 +120,10 @@ export class TUI {
         }
     }
 
-    /** Re-focus the input box (e.g. after async command output) */
     focusInput(): void {
         this.inputBox.focus();
     }
 
-    /** Render the screen */
     render(): void {
         this.screen.render();
     }

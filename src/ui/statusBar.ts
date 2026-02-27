@@ -3,10 +3,15 @@
  *
  * Shows: agentName · provider · model · ~N ctx tokens    [● daemon]
  */
-import * as blessed from "blessed";
+import { createRequire } from "node:module";
+import type * as Blessed from "blessed";
+
+const require = createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const blessed = require("blessed") as typeof Blessed;
 
 export interface StatusBarOptions {
-    screen: blessed.Widgets.Screen;
+    screen: Blessed.Widgets.Screen;
 }
 
 export interface StatusBarState {
@@ -18,7 +23,7 @@ export interface StatusBarState {
 }
 
 export class StatusBar {
-    private box: blessed.Widgets.BoxElement;
+    private box: Blessed.Widgets.BoxElement;
     private state: StatusBarState;
 
     constructor({ screen }: StatusBarOptions) {
@@ -47,12 +52,8 @@ export class StatusBar {
     private _render(): void {
         const { agentName, provider, model, ctxTokens, daemonRunning } = this.state;
 
-        const left = [agentName, provider, model]
-            .filter(Boolean)
-            .join(" · ");
-
+        const left = [agentName, provider, model].filter(Boolean).join(" · ");
         const ctxPart = ctxTokens !== undefined ? ` · ~${ctxTokens} ctx` : "";
-
         const daemonDot =
             daemonRunning === true
                 ? "{green-fg}●{/green-fg} running"
