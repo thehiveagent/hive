@@ -1,5 +1,8 @@
 import type { IncomingMessage } from "./handler.js";
 import type { IntegrationPlatform } from "./auth.js";
+import slackPkg from "@slack/bolt";
+
+const { App } = slackPkg as any;
 
 export interface SlackTokens {
   botToken: string; // xoxb-...
@@ -21,8 +24,6 @@ export interface RunningIntegration {
 }
 
 export async function startSlackIntegration(deps: SlackIntegrationDeps): Promise<RunningIntegration> {
-  const { App } = (await import("@slack/bolt")) as any;
-
   const socketMode = Boolean(deps.tokens.appToken);
   const app = new App({
     token: deps.tokens.botToken,

@@ -4,7 +4,7 @@ import { createConnection } from "node:net";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
-import { Command } from "commander";
+import type { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
 
@@ -93,7 +93,9 @@ function sendDaemonCommand(
     let responded = false;
 
     socket.on("data", (data: Buffer) => {
-      if (responded) return;
+      if (responded) {
+        return;
+      }
 
       buffer += data.toString();
 
@@ -229,10 +231,10 @@ async function waitForTcpReady(
 ): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start <= timeoutMs) {
-    // eslint-disable-next-line no-await-in-loop
     const ok = await canConnectTcp(port, Math.min(250, pollMs));
-    if (ok) return true;
-    // eslint-disable-next-line no-await-in-loop
+    if (ok) {
+      return true;
+    }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
   return false;
@@ -267,8 +269,56 @@ export async function runDaemonStartCommand(options: { force?: boolean } = {}): 
     spinner.text = "Starting service...";
     try {
       await startService();
+      
+      // Wait for watcher PID to appear (verify watcher actually started)
+      spinner.text = "Verifying watcher started...";
+      let watcherStarted = false;
+      for (let i = 0; i < 20; i++) { // Check for up to 10 seconds
+        const watcherStatus = isWatcherRunning();
+        if (watcherStatus.running) {
+          watcherStarted = true;
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
+      if (!watcherStarted) {
+        spinner.info("Watcher failed to start via launchctl, trying fallback...");
+        // Fallback: spawn watcher directly
+        const packageRoot = getPackageRootDir();
+        const watcherChild = spawn("node", ["dist/daemon/watcher.js"], {
+          cwd: packageRoot,
+          detached: true,
+          stdio: "ignore",
+          env: { ...process.env, HIVE_HOME },
+          windowsHide: true,
+        });
+        
+        watcherChild.unref();
+        
+        if (typeof watcherChild.pid === "number") {
+          // Write watcher PID manually since we spawned it directly
+          fs.writeFileSync(DAEMON_WATCHER_PID_FILE, String(watcherChild.pid));
+        }
+      }
     } catch {
-      // Best-effort: fallback spawn below
+      spinner.info("Service start failed, trying fallback...");
+      // Fallback: spawn watcher directly
+      const packageRoot = getPackageRootDir();
+      const watcherChild = spawn("node", ["dist/daemon/watcher.js"], {
+        cwd: packageRoot,
+        detached: true,
+        stdio: "ignore",
+        env: { ...process.env, HIVE_HOME },
+        windowsHide: true,
+      });
+      
+      watcherChild.unref();
+      
+      if (typeof watcherChild.pid === "number") {
+        // Write watcher PID manually since we spawned it directly
+        fs.writeFileSync(DAEMON_WATCHER_PID_FILE, String(watcherChild.pid));
+      }
     }
 
     const port = getDaemonPort();
@@ -298,7 +348,7 @@ export async function runDaemonStartCommand(options: { force?: boolean } = {}): 
     }
 
     spinner.text = `Waiting for daemon TCP on 127.0.0.1:${port}...`;
-    const ready = await waitForTcpReady(port, 5000, 500);
+    const ready = await waitForTcpReady(port, 10000, 500);
 
     spinner.stop();
 
@@ -339,7 +389,7 @@ export async function runDaemonStopCommand(): Promise<void> {
         const port = getDaemonPort();
         await sendDaemonCommand({ type: "stop" }, port);
         spinner.text = "Stop command sent";
-      } catch (error) {
+      } catch {
         // May fail if daemon is already unresponsive
         spinner.info("TCP connection failed (daemon may be unresponsive)");
       }
@@ -358,10 +408,9 @@ export async function runDaemonStopCommand(): Promise<void> {
       }
 
       // Force kill if still running
-      const pidNow = getDaemonPid();
-      if (pidNow && isProcessAlive(pidNow)) {
+      if (status.running) {
         try {
-          process.kill(status.pid!, "SIGKILL");
+          process.kill(status.pid, "SIGKILL");
         } catch {
           // Ignore
         }
@@ -404,7 +453,7 @@ export async function runDaemonRestartCommand(): Promise<void> {
     // Kill daemon if still running
     if (status.running) {
       try {
-        process.kill(status.pid!, "SIGKILL");
+        process.kill(status.pid ?? 0, "SIGKILL");
       } catch {
         // Ignore
       }
@@ -423,10 +472,10 @@ export async function runDaemonRestartCommand(): Promise<void> {
     // Start fresh
     await runDaemonStartCommand();
     spinner.succeed("Daemon restarted");
-  } catch (error) {
+  } catch {
     spinner.fail("Failed to restart daemon");
-    renderError(String(error));
-    throw error;
+    renderError("Unknown error occurred");
+    throw new Error("Failed to restart daemon");
   }
 }
 
@@ -483,7 +532,7 @@ export async function runDaemonStatusCommand(): Promise<void> {
   }
 
   // Try to get live status from daemon
-  let daemonStatusFromDaemon: any = null;
+  let daemonStatusFromDaemon: Record<string, unknown> | null = null;
   if (daemonStatus.running) {
     try {
       daemonStatusFromDaemon = await sendDaemonCommand({ type: "status" }, port);
@@ -541,12 +590,12 @@ export async function runDaemonStatusCommand(): Promise<void> {
   }
 
   // Port
-  const displayPort = daemonStatusFromDaemon?.port || port;
+  const displayPort = (daemonStatusFromDaemon?.port as number) || port;
 
   // Uptime
   let uptime = "n/a";
   if (daemonStatusFromDaemon) {
-    uptime = daemonStatusFromDaemon.uptime || "n/a";
+    uptime = typeof daemonStatusFromDaemon.uptime === "string" ? daemonStatusFromDaemon.uptime : "n/a";
   }
 
   // Integrations

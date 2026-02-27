@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "./handler.js";
 import type { IntegrationPlatform } from "./auth.js";
+import TelegramBot from "node-telegram-bot-api";
 
 export interface TelegramIntegrationDeps {
   token: string;
@@ -41,8 +42,7 @@ function splitTelegramText(text: string): string[] {
 }
 
 export async function startTelegramIntegration(deps: TelegramIntegrationDeps): Promise<RunningIntegration> {
-  const { default: TelegramBot } = (await import("node-telegram-bot-api")) as any;
-  const bot = new TelegramBot(deps.token, { polling: true });
+  const bot = new TelegramBot(encodeURIComponent(deps.token), { polling: true });
 
   const stop = async () => {
     try {
@@ -90,7 +90,7 @@ export async function startTelegramIntegration(deps: TelegramIntegrationDeps): P
         return;
       }
 
-      await bot.sendChatAction(chatId, "typing").catch(() => {});
+      await bot.sendChatAction(chatId, "typing").catch(() => { });
 
       const outgoing = await deps.handleMessage({
         platform: "telegram",

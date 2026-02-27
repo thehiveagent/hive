@@ -1,5 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import pkg from "whatsapp-web.js";
+import qrcode from "qrcode-terminal";
+
+const { Client, LocalAuth } = pkg as any;
 
 import type { IncomingMessage } from "./handler.js";
 import type { IntegrationPlatform } from "./auth.js";
@@ -19,8 +23,6 @@ export interface RunningIntegration {
 export async function startWhatsAppIntegration(
   deps: WhatsAppIntegrationDeps,
 ): Promise<RunningIntegration> {
-  const { Client, LocalAuth } = (await import("whatsapp-web.js")) as any;
-
   if (!fs.existsSync(deps.sessionDir)) {
     fs.mkdirSync(deps.sessionDir, { recursive: true });
   }
@@ -50,7 +52,7 @@ export async function startWhatsAppIntegration(
       const from = typeof message?.from === "string" ? message.from : "";
       if (!from) return;
 
-      await client.sendStateTyping(from).catch(() => {});
+      await client.sendStateTyping(from).catch(() => { });
 
       const outgoing = await deps.handleMessage({
         platform: "whatsapp",
@@ -84,9 +86,6 @@ export async function startWhatsAppIntegration(
 }
 
 export async function runWhatsAppSetup(sessionDir: string, log: (line: string) => void): Promise<void> {
-  const { Client, LocalAuth } = (await import("whatsapp-web.js")) as any;
-  const qrcode = (await import("qrcode-terminal")) as any;
-
   fs.mkdirSync(sessionDir, { recursive: true });
 
   const client = new Client({

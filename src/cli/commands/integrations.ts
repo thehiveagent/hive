@@ -1,4 +1,4 @@
-import { Command } from "commander";
+import type { Command } from "commander";
 import inquirer from "inquirer";
 import ora from "ora";
 import chalk from "chalk";
@@ -17,7 +17,7 @@ import {
 } from "../../integrations/auth.js";
 import { keychainSet } from "../../integrations/keychain.js";
 import { getHiveHomeDir } from "../../storage/db.js";
-import { renderError, renderHiveHeader, renderInfo, renderStep, renderSuccess } from "../ui.js";
+import { renderHiveHeader, renderInfo, renderStep, renderSuccess } from "../ui.js";
 
 const PLATFORMS: IntegrationPlatform[] = ["telegram", "whatsapp", "discord", "slack"];
 
@@ -205,7 +205,7 @@ async function runIntegrationsList(): Promise<void> {
   }
 }
 
-function getDaemonStatusViaTcp(port: number): Promise<Record<string, any> | null> {
+function getDaemonStatusViaTcp(port: number): Promise<Record<string, unknown> | null> {
   return new Promise((resolve) => {
     const socket = createConnection({ host: "127.0.0.1", port }, () => {
       socket.write(JSON.stringify({ type: "status" }) + "\n");
@@ -215,10 +215,12 @@ function getDaemonStatusViaTcp(port: number): Promise<Record<string, any> | null
     let responded = false;
 
     socket.on("data", (data: Buffer) => {
-      if (responded) return;
+      if (responded) {
+        return;
+      }
       buffer += data.toString();
       try {
-        const response = JSON.parse(buffer) as Record<string, any>;
+        const response = JSON.parse(buffer) as Record<string, unknown>;
         responded = true;
         socket.end();
         resolve(response);
@@ -243,7 +245,16 @@ async function runTelegramSetup(): Promise<void> {
       name: "token",
       message: "Bot token:",
       mask: "*",
-      validate: (v: string) => (String(v ?? "").trim().length ? true : "Token is required."),
+      validate: (v: string) => {
+        const trimmed = String(v ?? "").trim();
+        if (!trimmed.length) {
+          return "Token is required.";
+        }
+        if (/\s/.test(trimmed)) {
+          return "Token cannot contain spaces.";
+        }
+        return true;
+      },
     },
     {
       type: "input",
@@ -263,8 +274,8 @@ async function runTelegramSetup(): Promise<void> {
   // Test token
   const test = ora("Testing Telegram bot token...").start();
   try {
-    const { default: TelegramBot } = (await import("node-telegram-bot-api")) as any;
-    const bot = new TelegramBot(token, { polling: false });
+    const TelegramBot = (await import("node-telegram-bot-api")).default;
+    const bot = new TelegramBot(encodeURIComponent(token), { polling: false });
     const me = await bot.getMe();
     test.succeed(`Connected as @${me.username ?? "unknown"}`);
   } catch (error) {
@@ -333,12 +344,12 @@ async function runDiscordSetup(): Promise<void> {
   const spinner = ora("Registering Discord slash commands...").start();
   try {
     const discord = await import("discord.js");
-    const { Client, GatewayIntentBits, REST, Routes } = discord as any;
+    const { Client, GatewayIntentBits, REST, Routes } = discord;
 
     const client = new Client({ intents: [GatewayIntentBits.Guilds] });
     const appId = await new Promise<string>((resolve, reject) => {
       client.once("ready", () => resolve(String(client.application?.id ?? "")));
-      client.once("error", (err: any) => reject(err));
+      client.once("error", (err: Error) => reject(err));
       client.login(token).catch(reject);
     });
 

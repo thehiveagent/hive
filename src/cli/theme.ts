@@ -11,6 +11,7 @@ export const BUILT_IN_THEMES = {
   rose: "#FF4081",
   slate: "#90A4AE",
   green: "#00E676",
+  blue: "#00E676",
 } as const;
 
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;

@@ -1,5 +1,7 @@
 import type { IncomingMessage } from "./handler.js";
 import type { IntegrationPlatform } from "./auth.js";
+import * as discordPkg from "discord.js";
+const { Client, GatewayIntentBits, Partials, AttachmentBuilder, SlashCommandBuilder } = discordPkg as any;
 
 export interface DiscordIntegrationDeps {
   token: string;
@@ -27,9 +29,6 @@ function chunk(text: string, max: number): string[] {
 }
 
 export async function startDiscordIntegration(deps: DiscordIntegrationDeps): Promise<RunningIntegration> {
-  const discord = await import("discord.js");
-  const { Client, GatewayIntentBits, Partials, AttachmentBuilder } = discord as any;
-
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -155,7 +154,6 @@ export async function startDiscordIntegration(deps: DiscordIntegrationDeps): Pro
 export async function buildDiscordSlashCommandData(): Promise<unknown[]> {
   // Returned shape used by setup command with REST registration.
   // Keeping this helper here avoids duplicating definitions.
-  const { SlashCommandBuilder } = (await import("discord.js")) as any;
   const tasks = new SlashCommandBuilder().setName("tasks").setDescription("Show Hive tasks");
   const status = new SlashCommandBuilder().setName("status").setDescription("Show Hive status");
   const ask = new SlashCommandBuilder()
