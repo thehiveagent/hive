@@ -17,6 +17,7 @@ import { registerTaskCommand } from "./commands/task.js";
 import { registerIntegrationsCommand } from "./commands/integrations.js";
 import { getLocalVersion } from "./helpers/version.js";
 import { renderError, renderHiveHeader } from "./ui.js";
+import { printBanner } from "../ui/banner.js";
 
 const program = new Command();
 
@@ -44,6 +45,7 @@ void main();
 async function main(): Promise<void> {
   try {
     if (argv.length === 0) {
+      printBanner();
       await runChatCommand({}, { entrypoint: "default" });
       return;
     }
