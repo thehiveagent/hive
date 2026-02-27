@@ -2,19 +2,30 @@ import { readFile, writeFile, readdir, mkdir, unlink, rename, stat } from "fs/pr
 import { join, resolve } from "path";
 import { homedir } from "os";
 import { existsSync } from "fs";
+import { cwd } from "process";
 import { terminalTool } from "./terminal.js";
 
 export class FilesystemTool {
   private homeDir: string;
   private logPath: string;
+  private launchCwd: string;
+  private allowedPaths: Set<string>;
 
   constructor() {
     this.homeDir = homedir();
+    this.launchCwd = cwd();
+    this.allowedPaths = new Set([this.homeDir, this.launchCwd, "/Volumes"]);
+    
     const hiveDir = join(this.homeDir, ".hive");
     if (!existsSync(hiveDir)) {
       mkdir(hiveDir, { recursive: true });
     }
     this.logPath = join(hiveDir, "daemon.log");
+  }
+
+  // Allow additional paths during session
+  allowPath(path: string): void {
+    this.allowedPaths.add(resolve(path));
   }
 
   async readFile(path: string): Promise<string> {
@@ -172,9 +183,14 @@ export class FilesystemTool {
     // Resolve relative paths
     const resolved = resolve(expanded);
     
-    // Ensure path is within home directory
-    if (!resolved.startsWith(this.homeDir)) {
-      throw new Error(`Access denied: Path ${path} resolves to ${resolved}, which is outside home directory`);
+    // Check if path is within any allowed directory
+    const isAllowed = Array.from(this.allowedPaths).some(allowedPath => 
+      resolved === allowedPath || resolved.startsWith(allowedPath + "/")
+    );
+    
+    if (!isAllowed) {
+      const allowedList = Array.from(this.allowedPaths).join(", ");
+      throw new Error(`Access denied: Path ${path} resolves to ${resolved}, which is outside allowed directories: ${allowedList}`);
     }
     
     return resolved;

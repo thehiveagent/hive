@@ -32,6 +32,7 @@ import {
   insertKnowledge,
   listKnowledge,
   listTasks,
+  clearCompletedTasks,
   setMetaValue,
   type KnowledgeRecord,
   type MessageRecord,
@@ -108,6 +109,7 @@ const COMMAND_HELP_TEXT = [
   "  /integrations   show integrations status",
   "  /tasks          list background tasks",
   "  /task <desc>    queue a background task",
+  "  /task clear     clear completed/failed tasks",
   "  /permissions    review pending auth",
   "  /remember <fact> save a fact",
   "  /forget <thing>  delete closest fact",
@@ -1420,6 +1422,20 @@ async function handleChatSlashCommand(input: {
     insertTask(input.db, { id, title, agentId });
     void sendDaemonCommandInline({ type: "task", payload: { id, title, agent_id: agentId } });
     renderSuccess(`✓ Task queued · ${id}`);
+    input.lastUserPromptRef.value = null;
+    return true;
+  }
+
+  if (lower === "/task clear") {
+    const confirmed = await promptYesNo("This will delete all done/failed tasks. Continue? (y/n) ");
+    if (!confirmed) {
+      renderInfo("Cancelled.");
+      input.lastUserPromptRef.value = null;
+      return true;
+    }
+
+    const deleted = clearCompletedTasks(input.db);
+    renderSuccess(`✓ Cleared ${deleted} tasks.`);
     input.lastUserPromptRef.value = null;
     return true;
   }

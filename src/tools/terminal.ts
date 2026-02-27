@@ -3,8 +3,47 @@ import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
 import { existsSync } from "fs";
+import { cwd } from "process";
 
 const COMMAND_TIMEOUT = 30000; // 30 seconds
+
+// Simple shell-words parser that respects quoted strings
+function parseShellWords(command: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  let quoteChar = "";
+  let i = 0;
+
+  while (i < command.length) {
+    const char = command[i];
+    
+    if ((char === '"' || char === "'") && !inQuotes) {
+      inQuotes = true;
+      quoteChar = char;
+      i++;
+    } else if (char === quoteChar && inQuotes) {
+      inQuotes = false;
+      quoteChar = "";
+      i++;
+    } else if (char === " " && !inQuotes) {
+      if (current) {
+        args.push(current);
+        current = "";
+      }
+      i++;
+    } else {
+      current += char;
+      i++;
+    }
+  }
+  
+  if (current) {
+    args.push(current);
+  }
+  
+  return args;
+}
 
 // Dangerous commands that should be blocked
 const DANGEROUS_COMMANDS = [
@@ -35,6 +74,7 @@ export interface CommandResult {
 
 export class TerminalTool {
   private logPath: string;
+  private defaultCwd: string;
 
   constructor() {
     const hiveDir = join(homedir(), ".hive");
@@ -42,10 +82,13 @@ export class TerminalTool {
       mkdir(hiveDir, { recursive: true });
     }
     this.logPath = join(hiveDir, "daemon.log");
+    // Store the original working directory where hive was launched
+    this.defaultCwd = cwd();
   }
 
   async runCommand(command: string, cwd?: string): Promise<CommandResult> {
-    await this.logOperation(`COMMAND: ${command}${cwd ? ` (cwd: ${cwd})` : ""}`);
+    const workingDir = cwd || this.defaultCwd;
+    await this.logOperation(`COMMAND: ${command} (cwd: ${workingDir})`);
 
     // Check for dangerous commands
     if (this.isDangerousCommand(command)) {
@@ -59,15 +102,23 @@ export class TerminalTool {
     }
 
     return new Promise((resolve) => {
-      const [cmd, ...args] = command.split(" ");
+      const args = parseShellWords(command);
+      if (args.length === 0) {
+        resolve({
+          stdout: "",
+          stderr: "Empty command",
+          exitCode: 1,
+        });
+        return;
+      }
+
+      const [cmd, ...cmdArgs] = args;
       let child;
 
       try {
-        child = spawn(cmd, args, {
-          cwd: cwd || process.cwd(),
+        child = spawn(cmd, cmdArgs, {
+          cwd: workingDir,
           stdio: ["pipe", "pipe", "pipe"],
-          shell: true,
-          timeout: COMMAND_TIMEOUT,
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -124,6 +175,42 @@ export class TerminalTool {
         });
       });
     });
+  }
+
+  private parseCommandArgs(command: string): string[] {
+    const args: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    let quoteChar = '"';
+    let i = 0;
+
+    while (i < command.length) {
+      const char = command[i];
+      
+      if ((char === '"' || char === "'") && !inQuotes) {
+        inQuotes = true;
+        quoteChar = char;
+        i++;
+      } else if (char === quoteChar && inQuotes) {
+        inQuotes = false;
+        i++;
+      } else if (char === ' ' && !inQuotes) {
+        if (current) {
+          args.push(current);
+          current = "";
+        }
+        i++;
+      } else {
+        current += char;
+        i++;
+      }
+    }
+    
+    if (current) {
+      args.push(current);
+    }
+    
+    return args;
   }
 
   private isDangerousCommand(command: string): boolean {
